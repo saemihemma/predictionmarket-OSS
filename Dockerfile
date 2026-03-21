@@ -9,5 +9,5 @@ FROM node:22-slim
 RUN npm install -g serve
 WORKDIR /app
 COPY --from=build /app/dist ./dist
-EXPOSE 3000
-CMD ["serve", "dist", "-l", "3000"]
+EXPOSE 8080
+CMD ["serve", "dist", "-l", "8080"]
