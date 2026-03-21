@@ -1,0 +1,6 @@
+[build]
+builder = "nixpacks"
+buildCommand = "cd frontend && npm install && npx vite build"
+
+[deploy]
+startCommand = "cd frontend && npx vite preview --port $PORT --host 0.0.0.0"
