@@ -10,4 +10,4 @@ RUN npm install -g serve
 WORKDIR /app
 COPY --from=build /app/dist ./dist
 EXPOSE 8080
-CMD ["serve", "dist", "-l", "8080"]
+CMD ["serve", "dist", "-s", "-l", "8080"]
