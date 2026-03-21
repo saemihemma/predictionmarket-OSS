@@ -3,7 +3,7 @@ WORKDIR /app
 COPY frontend/package.json ./
 RUN npm install
 COPY frontend/ .
-RUN npx vite build
+RUN rm -rf node_modules package-lock.json && npm install && npx vite build
 
 FROM node:18-slim
 WORKDIR /app
