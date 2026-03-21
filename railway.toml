@@ -1,5 +1,6 @@
 [build]
 builder = "nixpacks"
+nixpacksConfigPath = "frontend/package.json"
 buildCommand = "cd frontend && npm install && npx vite build"
 
 [deploy]
