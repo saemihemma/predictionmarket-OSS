@@ -6,9 +6,8 @@ COPY frontend/ .
 RUN rm -rf node_modules package-lock.json && npm install && npx vite build
 
 FROM node:22-slim
+RUN npm install -g serve
 WORKDIR /app
 COPY --from=build /app/dist ./dist
-COPY --from=build /app/package.json ./
-RUN npm install --omit=dev
 EXPOSE 3000
-CMD ["npx", "vite", "preview", "--port", "3000", "--host", "0.0.0.0"]
+CMD ["serve", "dist", "-l", "3000"]
