@@ -1,7 +1,7 @@
 [build]
-builder = "nixpacks"
-nixpacksConfigPath = "frontend/package.json"
-buildCommand = "cd frontend && npm install && npx vite build"
+builder = "dockerfile"
+dockerfilePath = "Dockerfile"
 
 [deploy]
-startCommand = "cd frontend && npx vite preview --port $PORT --host 0.0.0.0"
+healthcheckPath = "/"
+restartPolicyType = "on_failure"
