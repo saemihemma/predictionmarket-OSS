@@ -1,0 +1,7 @@
+node_modules
+dist
+build
+.git
+contracts/build
+frontend/dist
+*.log
