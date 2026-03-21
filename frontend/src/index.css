@@ -1,0 +1,415 @@
+@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&display=swap");
+
+@import "tailwindcss";
+
+/* ─── Tailwind v4 Theme Configuration ────────────────────────────────── */
+
+@theme {
+  /* Colors - map to existing CSS custom properties */
+  --color-bg-terminal: #020503;
+  --color-bg-panel: #06110c;
+  --color-mint: #caf5de;
+  --color-mint-dim: #6e9f8d;
+  --color-orange: #dd7a1f;
+  --color-orange-dim: #8a4a10;
+  --color-yellow: #f2c94c;
+  --color-yellow-dim: #8a7428;
+  --color-neutral-state: #4f6b60;
+  --color-text: #caf5de;
+  --color-text-muted: #6e9f8d;
+  --color-text-dim: #5a7a6a;
+  --color-tribe-a: #f2c94c;
+  --color-tribe-a-dim: #8a7428;
+  --color-tribe-b: #4db8d4;
+  --color-tribe-b-dim: #2a6e82;
+  --color-border-panel: #2a3a33;
+  --color-border-active: #caf5de;
+  --color-border-grid: #0f1e18;
+  --color-border-inactive: #1b2b24;
+  --color-border-edge: #6e9f8d;
+  --color-glow-mint: rgba(202, 245, 222, 0.18);
+  --color-glow-orange: rgba(221, 122, 31, 0.18);
+  --color-glow-tribe-a: rgba(242, 201, 76, 0.18);
+  --color-glow-tribe-b: rgba(77, 184, 212, 0.18);
+
+  /* Font family */
+  --font-mono: 'IBM Plex Mono', monospace;
+}
+
+/* ─── Terminal Design Tokens ─────────────────────────────────────────── */
+
+:root {
+  /* Backgrounds */
+  --bg-terminal: #020503;
+  --bg-panel: #06110c;
+
+  /* UI chrome / terminal phosphor */
+  --mint: #caf5de;
+  --mint-dim: #6e9f8d;
+
+  /* Contested / phase-transition warning */
+  --orange: #dd7a1f;
+  --orange-dim: #8a4a10;
+
+  /* Tribe A faction channel (stable ownership — same hue as old contested) */
+  --yellow: #f2c94c;
+  --yellow-dim: #8a7428;
+
+  /* Neutral state */
+  --neutral-state: #4f6b60;
+
+  /* Borders */
+  --border-panel: #2a3a33;
+  --border-active: #caf5de;
+  --border-grid: #0f1e18;
+  --border-inactive: #1b2b24;
+  --border-edge: #6e9f8d;
+
+  /* Text */
+  --text: #caf5de;
+  --text-muted: #6e9f8d;
+  --text-dim: #5a7a6a;
+
+  /* Faction color channels — data layer, distinct from UI chrome.
+     Tribe A = yellow/amber (stable ownership channel — NOT mint).
+     Tribe B = cyan-teal (second CRT channel).
+     Orange = contested/instability/phase-transition warning only. */
+  --tribe-a: #f2c94c;
+  --tribe-a-dim: #8a7428;
+  --tribe-b: #4db8d4;
+  --tribe-b-dim: #2a6e82;
+  --contested: var(--orange);
+
+  /* Glow */
+  --glow-mint: rgba(202, 245, 222, 0.18);
+  --glow-tribe-a: rgba(242, 201, 76, 0.18);
+  --glow-tribe-b: rgba(77, 184, 212, 0.18);
+  --glow-orange: rgba(221, 122, 31, 0.18);
+  --glow-yellow: rgba(242, 201, 76, 0.18);
+
+  /* shadcn/ui CSS variable overrides for CRT theme */
+  --background: 120 43% 2%;        /* #020503 in HSL */
+  --foreground: 147 67% 87%;       /* #caf5de in HSL */
+  --card: 150 33% 5%;              /* #06110c in HSL */
+  --card-foreground: 147 67% 87%;  /* #caf5de */
+  --primary: 147 67% 87%;          /* mint */
+  --primary-foreground: 120 43% 2%; /* bg-terminal */
+  --secondary: 150 33% 5%;         /* bg-panel */
+  --secondary-foreground: 147 67% 87%;
+  --muted: 155 18% 53%;            /* mint-dim */
+  --muted-foreground: 155 18% 53%;
+  --accent: 28 77% 49%;            /* orange */
+  --accent-foreground: 120 43% 2%;
+  --destructive: 28 77% 49%;       /* orange for warnings */
+  --destructive-foreground: 147 67% 87%;
+  --border: 156 16% 18%;           /* border-panel */
+  --input: 156 16% 18%;
+  --ring: 147 67% 87%;             /* mint */
+  --radius: 0px;                   /* no border radius for terminal look */
+}
+
+/* ─── Base ───────────────────────────────────────────────────────────── */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: var(--bg-terminal);
+  color: var(--text);
+  font-family: "IBM Plex Mono", "Courier New", monospace;
+  font-size: 16px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  animation: terminalFlicker 8s ease-in-out infinite;
+  /* Subtle background grid */
+  background-image: linear-gradient(
+      var(--border-grid) 1px,
+      transparent 1px
+    ),
+    linear-gradient(90deg, var(--border-grid) 1px, transparent 1px);
+  background-size: 32px 32px;
+}
+
+/* ─── Typography ─────────────────────────────────────────────────────── */
+/*
+ * Font family is set on body. Tailwind classes control size, weight,
+ * spacing, and color per-element. No global overrides on h1-h4/p/span —
+ * they fought Tailwind specificity and caused inconsistent rendering.
+ *
+ * Removed (2026-03-20):
+ *   - h1-h4 { font-weight, letter-spacing, color, font-size } — fought Tailwind
+ *   - p/span/label/td/th/li { font-family } — redundant with body
+ *   - code { color, font-size } — redundant with Tailwind
+ */
+
+h1, h2, h3, h4 {
+  margin: 0;
+}
+
+/* ─── CRT Scanlines (applied at shell level via CRTOverlay component) ── */
+
+/* Subliminal CRT phosphor flicker — fires every ~8s, almost imperceptible */
+@keyframes terminalFlicker {
+  0%, 89%, 100% { opacity: 1; }
+  90% { opacity: 0.97; }
+  91% { opacity: 1; }
+  92.5% { opacity: 0.96; }
+  93% { opacity: 1; }
+}
+
+@keyframes scanline-scroll {
+  0% { transform: translateY(0); }
+  100% { transform: translateY(4px); }
+}
+
+.crt-scanlines {
+  pointer-events: none;
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(0, 0, 0, 0.06) 2px,
+    rgba(0, 0, 0, 0.06) 4px
+  );
+  animation: scanline-scroll 0.1s linear infinite;
+}
+
+.crt-vignette {
+  pointer-events: none;
+  position: fixed;
+  inset: 0;
+  z-index: 9998;
+  background: radial-gradient(
+    ellipse at center,
+    transparent 60%,
+    rgba(0, 0, 0, 0.45) 100%
+  );
+}
+
+.crt-grain {
+  pointer-events: none;
+  position: fixed;
+  inset: 0;
+  z-index: 9997;
+  opacity: 0.025;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
+  background-repeat: repeat;
+  background-size: 128px 128px;
+}
+
+/* ─── Mint glow utility ──────────────────────────────────────────────── */
+
+.glow-mint {
+  text-shadow: 0 0 8px rgba(202, 245, 222, 0.25);
+}
+
+.glow-orange {
+  text-shadow: 0 0 8px rgba(221, 88, 7, 0.3);
+}
+
+.glow-yellow {
+  text-shadow: 0 0 8px rgba(242, 201, 76, 0.3);
+}
+
+.glow-card:hover {
+  box-shadow: 0 0 16px rgba(202, 245, 222, 0.08);
+}
+
+/* ─── Terminal panel ─────────────────────────────────────────────────── */
+
+.terminal-panel {
+  background: var(--bg-panel);
+  border: 1px solid var(--border-panel);
+  position: relative;
+}
+
+.terminal-panel::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    180deg,
+    rgba(202, 245, 222, 0.015) 0%,
+    transparent 40%
+  );
+}
+
+/* ─── Form Elements ──────────────────────────────────────────────────── */
+
+input,
+textarea,
+select {
+  font-family: "IBM Plex Mono", monospace;
+}
+
+input:focus,
+textarea:focus,
+select:focus {
+  border-color: var(--mint);
+  box-shadow: 0 0 8px rgba(202, 245, 222, 0.15);
+  outline: none;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--text-dim);
+  opacity: 0.7;
+}
+
+/* ─── Focus Indicators ───────────────────────────────────────────────── */
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: 2px solid var(--mint);
+  outline-offset: 2px;
+}
+
+/* ─── Scrollbars ─────────────────────────────────────────────────────── */
+
+::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg-terminal);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-panel);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--mint-dim);
+}
+
+/* ─── Mobile hero nudge ──────────────────────────────────────────────── */
+
+.hero-content-overlay {
+  padding-bottom: 0;
+}
+@media (max-width: 768px) {
+  .hero-content-overlay {
+    padding-bottom: 6dvh;
+  }
+}
+
+/* ─── Captain panels responsive layout ───────────────────────────────── */
+
+.captain-panels-row {
+  display: flex;
+  flex-direction: row;
+  gap: 1.5rem;
+  justify-content: center;
+  align-items: stretch;
+}
+@media (max-width: 768px) {
+  .captain-panels-row {
+    flex-direction: column;
+    align-items: center;
+    gap: 0.6rem;
+  }
+  .war-feed-block {
+    display: none !important;
+  }
+  .annotations-desktop-only {
+    display: none;
+  }
+}
+
+/* ─── Captain panel mobile compact ──────────────────────────────────── */
+
+.captain-panel {
+  width: min(320px, 42vw);
+}
+@media (max-width: 768px) {
+  .captain-panel {
+    width: 85vw;
+    max-width: 320px;
+  }
+  .captain-panel-title {
+    padding: 0.35rem 0.65rem;
+  }
+  .captain-panel-body {
+    padding: 0.5rem 0.65rem;
+    gap: 0.4rem;
+  }
+  .captain-panel-label {
+    font-size: 0.5rem;
+    margin-bottom: 0.1rem;
+  }
+  .captain-panel-value {
+    font-size: 0.65rem;
+  }
+}
+
+/* ─── Number Input (Hide Browser Arrows) ─────────────────────────── */
+
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type="number"] {
+  -moz-appearance: textfield;
+}
+
+/* ─── Fix Overflow / Scrollbar Bug ──────────────────────────────────── */
+
+html,
+body,
+#root {
+  overflow-x: hidden;
+}
+
+/* ─── Claim Button Animation ──────────────────────────────────────── */
+
+@keyframes claim-glow-breathe {
+  0%, 100% {
+    box-shadow: 0 0 8px rgba(202, 245, 222, 0.15);
+    border-color: var(--mint-dim);
+  }
+  50% {
+    box-shadow: 0 0 20px rgba(202, 245, 222, 0.4);
+    border-color: var(--mint);
+  }
+}
+
+.claim-glow-pulse {
+  animation: claim-glow-breathe 1.2s ease-in-out infinite;
+}
+
+/* ─── Reduced motion ─────────────────────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+
+  .crt-scanlines {
+    animation: none;
+  }
+}

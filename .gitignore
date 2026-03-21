@@ -1,0 +1,36 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build
+build/
+dist/
+.vercel/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# IDE
+.cursor/
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Move
+contracts/build/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Keys — NEVER commit
+*.pem
+*.key
+keypair*

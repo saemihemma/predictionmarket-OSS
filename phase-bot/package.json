@@ -1,0 +1,33 @@
+{
+  "name": "suffer-phase-bot",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "SDVM Phase Transition Bot — Permissionless automation for phase advancement",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "lint": "eslint src --ext .ts",
+    "test": "tsx test/**/*.test.ts"
+  },
+  "dependencies": {
+    "@mysten/sui": "^2.0.0",
+    "express": "^4.18.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.0.0"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.0",
+    "@types/cors": "^2.8.0",
+    "@types/node": "^20.0.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.3.0",
+    "eslint": "^8.0.0",
+    "@typescript-eslint/parser": "^6.0.0",
+    "@typescript-eslint/eslint-plugin": "^6.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
