@@ -2,7 +2,9 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { outcomeProbabilityBps } from "../lib/amm";
 import { MarketState } from "../lib/market-types";
-import { useAllMarkets, useMarketStats } from "../hooks/useMarketData";
+import { useAllMarkets } from "../hooks/useMarketData";
+import { formatCollateralAmount } from "../lib/collateral";
+import { COLLATERAL_SYMBOL } from "../lib/market-constants";
 import Footer from "../components/ui/Footer";
 import PageHeader from "../components/ui/PageHeader";
 import TerminalScreen from "../components/terminal/TerminalScreen";
@@ -11,7 +13,9 @@ export default function MarketsIndexPage() {
 
   // F7: Use hooks instead of direct mock imports
   const { markets: mockMarkets } = useAllMarkets();
-  const { totalMarkets, totalVolume, activeTraders } = useMarketStats();
+  const totalMarkets = mockMarkets.length;
+  const totalVolume = formatCollateralAmount(mockMarkets.reduce((sum, market) => sum + market.totalCollateral, 0n));
+  const activeTraders = new Set(mockMarkets.map((market) => market.creator).filter(Boolean)).size;
 
   // Derive display data from shared markets
   const MOCK_MARKETS = mockMarkets.map(m => {
@@ -36,8 +40,6 @@ export default function MarketsIndexPage() {
    - Mint elements (cards, CREATE MARKET, CONNECT WALLET) → brighter mint glow
    - Orange elements ($SUFFER AIRDROP) → brighter orange glow
    No mixing. Consistent. */
-
-const CARD_HEIGHT = 200; // Fixed height — room for title + badge tag + probability + footer
 
 type FilterTab = "all" | "open" | "closing" | "needs-proposal" | "proposal-pending" | "disputed" | "resolved";
 
@@ -88,7 +90,7 @@ type FilterTab = "all" | "open" | "closing" | "needs-proposal" | "proposal-pendi
       {/* Stats Bar */}
       <div className="flex gap-8 px-8 py-3 border-b border-border-grid text-xs text-text tracking-[0.08em] overflow-x-hidden">
         <span>MARKETS: <span className="text-mint font-semibold">{totalMarkets}</span></span>
-        <span className="border-l border-border-panel pl-8">24H VOLUME: <span className="text-mint font-semibold">{totalVolume} SFR</span></span>
+        <span className="border-l border-border-panel pl-8">TOTAL COLLATERAL: <span className="text-mint font-semibold">{totalVolume} {COLLATERAL_SYMBOL}</span></span>
         <span className="border-l border-border-panel pl-8">ACTIVE TRADERS: <span className="text-mint font-semibold">{activeTraders}</span></span>
         <span className="border-l border-border-panel pl-8">NETWORK: <span className="text-tribe-b font-semibold">TESTNET</span></span>
       </div>
@@ -161,7 +163,15 @@ type FilterTab = "all" | "open" | "closing" | "needs-proposal" | "proposal-pendi
                 <div
                   className="text-sm font-semibold tracking-[0.04em] leading-6 text-mint overflow-hidden line-clamp-2"
                   style={{
-                    paddingRight: (market.state !== MarketState.OPEN || market.state === MarketState.CLOSED) ? "5rem" : 0,
+                    paddingRight:
+                      market.state === MarketState.RESOLUTION_PENDING ||
+                      market.state === MarketState.DISPUTED ||
+                      market.state === MarketState.RESOLVED ||
+                      market.state === MarketState.INVALID ||
+                      (market.state === MarketState.OPEN && (market.closeTimeMs - Date.now()) < 12 * 60 * 60 * 1000) ||
+                      (market.state === MarketState.CLOSED && !market.proposal)
+                        ? "5rem"
+                        : 0,
                   }}
                 >
                   {market.title}
