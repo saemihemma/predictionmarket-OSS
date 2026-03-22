@@ -1,10 +1,11 @@
 import { MarketType, MARKET_TYPE_LABELS } from "../../lib/market-types";
+import { COLLATERAL_SYMBOL } from "../../lib/market-constants";
 
 interface ReviewStepProps {
   title: string;
   description: string;
   marketType: MarketType;
-  trustTier: "verified" | "sourced" | "community" | "experimental";
+  trustTier: "sourceBackedCommunity" | "openCommunity";
   outcomes: string[];
   closeDate: string;
   resolutionSourceType: string;
@@ -27,6 +28,9 @@ export default function ReviewStep({
   creationBond,
   resolutionBond,
 }: ReviewStepProps) {
+  const profileLabel =
+    trustTier === "sourceBackedCommunity" ? "Source-Backed Community" : "Open Community";
+
   return (
     <div className="text-base text-text leading-[1.7]">
       <div className="mb-6">
@@ -40,24 +44,18 @@ export default function ReviewStep({
       </div>
 
       <div className="mb-6">
-        <div className="text-text-dim mb-1 text-xs font-medium">
-          MARKET TYPE
-        </div>
+        <div className="text-text-dim mb-1 text-xs font-medium">MARKET TYPE</div>
         <div className="text-base">{MARKET_TYPE_LABELS[marketType]}</div>
       </div>
 
       <div className="mb-6">
-        <div className="text-text-dim mb-1 text-xs font-medium">TRUST TIER</div>
-        <div className="text-base">
-          {trustTier.charAt(0).toUpperCase() + trustTier.slice(1)}
-        </div>
+        <div className="text-text-dim mb-1 text-xs font-medium">PUBLIC PROFILE</div>
+        <div className="text-base">{profileLabel}</div>
       </div>
 
       <div className="mb-6">
         <div className="text-text-dim mb-1 text-xs font-medium">OUTCOMES</div>
-        <div className="text-base">
-          {outcomes.filter((o) => o).join(", ") || "Not set"}
-        </div>
+        <div className="text-base">{outcomes.filter((o) => o).join(", ") || "Not set"}</div>
       </div>
 
       <div className="mb-6">
@@ -66,20 +64,18 @@ export default function ReviewStep({
       </div>
 
       <div className="mb-6">
-        <div className="text-text-dim mb-1 text-xs font-medium">
-          RESOLUTION SOURCE
-        </div>
+        <div className="text-text-dim mb-1 text-xs font-medium">EVIDENCE INPUT</div>
         <div className="text-base">
           <div>Type: {resolutionSourceType}</div>
-          <div>URI: {resolutionSourceUri || "Not set"}</div>
-          <div>Creator controls: {creatorControls ? "Yes" : "No"}</div>
+          <div>URI: {resolutionSourceUri || "Optional / not set"}</div>
+          <div>Creator controls source: {creatorControls ? "Yes" : "No"}</div>
         </div>
       </div>
 
       <div className="mb-6">
         <div className="text-text-dim mb-1 text-xs font-medium">BONDS</div>
         <div className="text-base">
-          Creation: {creationBond} SFR | Dispute: {resolutionBond} SFR
+          Creation: {creationBond} {COLLATERAL_SYMBOL} | Dispute: {resolutionBond} {COLLATERAL_SYMBOL}
         </div>
       </div>
     </div>

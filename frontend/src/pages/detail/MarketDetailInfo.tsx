@@ -1,56 +1,39 @@
-/**
- * MarketDetailInfo: Description, Resolution Rules, and Market Details
- * Always visible on the left column
- */
-
 import { formatNumber } from "../../lib/formatting";
+import { COLLATERAL_SYMBOL } from "../../lib/market-constants";
 
 export default function MarketDetailInfo({ market }: { market: any }) {
   return (
     <div className="flex flex-col gap-6">
-      {/* Description Card */}
-      <div className="p-6 bg-bg-panel border border-border-panel">
-        <h3 className="text-[1.1rem] font-bold text-mint mb-3 tracking-[0.1em]">DESCRIPTION</h3>
-        <p className="text-base text-text leading-relaxed m-0">
-          {market.description}
-        </p>
+      <div className="border border-border-panel bg-bg-panel p-5 sm:p-6">
+        <h3 className="mb-3 text-[1.1rem] font-bold tracking-[0.1em] text-mint">DESCRIPTION</h3>
+        <p className="m-0 text-base leading-relaxed text-text">{market.description}</p>
       </div>
 
-      {/* Resolution Rules Card */}
-      <div className="p-6 bg-bg-panel border border-border-panel">
-        <h3 className="text-[1.1rem] font-bold text-mint mb-3 tracking-[0.1em]">RESOLUTION RULES</h3>
-        <div className="text-[0.95rem] text-text-muted leading-relaxed">
-          {market.resolutionText}
-        </div>
+      <div className="border border-border-panel bg-bg-panel p-5 sm:p-6">
+        <h3 className="mb-3 text-[1.1rem] font-bold tracking-[0.1em] text-mint">RESOLUTION RULES</h3>
+        <div className="text-[0.95rem] leading-relaxed text-text-muted">{market.resolutionText}</div>
       </div>
 
-      {/* Market Details Card */}
-      <div className="p-6 bg-bg-panel border border-border-panel">
-        <h3 className="text-[1.1rem] font-bold text-mint mb-3 tracking-[0.1em]">MARKET DETAILS</h3>
-        <div className="grid grid-cols-2 gap-4 text-[0.95rem]">
-          <div className="px-3 py-2 bg-bg-terminal border border-border-panel">
-            <div className="text-text-dim mb-1 text-sm font-medium">CREATED</div>
+      <div className="border border-border-panel bg-bg-panel p-5 sm:p-6">
+        <h3 className="mb-3 text-[1.1rem] font-bold tracking-[0.1em] text-mint">MARKET DETAILS</h3>
+        <div className="grid gap-4 sm:grid-cols-2 text-[0.95rem]">
+          <div className="border border-border-panel bg-bg-terminal px-3 py-2">
+            <div className="mb-1 text-sm font-medium text-text-dim">CREATED</div>
+            <div className="text-text">{new Date(market.createdAtMs).toLocaleDateString()}</div>
+          </div>
+          <div className="border border-border-panel bg-bg-terminal px-3 py-2">
+            <div className="mb-1 text-sm font-medium text-text-dim">CLOSES</div>
+            <div className="text-text">{new Date(market.closeTimeMs).toLocaleDateString()}</div>
+          </div>
+          <div className="border border-border-panel bg-bg-terminal px-3 py-2">
+            <div className="mb-1 text-sm font-medium text-text-dim">TOTAL VOLUME</div>
             <div className="text-text">
-              {new Date(market.createdAtMs).toLocaleDateString()}
+              {formatNumber(market.totalCollateral)} {COLLATERAL_SYMBOL}
             </div>
           </div>
-          <div className="px-3 py-2 bg-bg-terminal border border-border-panel">
-            <div className="text-text-dim mb-1 text-sm font-medium">CLOSES</div>
-            <div className="text-text">
-              {new Date(market.closeTimeMs).toLocaleDateString()}
-            </div>
-          </div>
-          <div className="px-3 py-2 bg-bg-terminal border border-border-panel">
-            <div className="text-text-dim mb-1 text-sm font-medium">TOTAL VOLUME</div>
-            <div className="text-text">
-              {formatNumber(market.totalCollateral)} SUFFER
-            </div>
-          </div>
-          <div className="px-3 py-2 bg-bg-terminal border border-border-panel">
-            <div className="text-text-dim mb-1 text-sm font-medium">RESOLUTION SOURCE</div>
-            <div className="text-text text-sm">
-              {market.sourceDeclaration.sourceDescription}
-            </div>
+          <div className="border border-border-panel bg-bg-terminal px-3 py-2">
+            <div className="mb-1 text-sm font-medium text-text-dim">RESOLUTION SOURCE</div>
+            <div className="break-words text-sm text-text">{market.sourceDeclaration.sourceDescription}</div>
           </div>
         </div>
       </div>

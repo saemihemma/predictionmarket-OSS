@@ -21,7 +21,6 @@ export {
   useMarketData,
   useAllMarkets,
   usePortfolio,
-  useMarketStats,
 } from "./hooks/useMarketData";
 
 // Utilities

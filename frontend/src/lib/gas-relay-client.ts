@@ -9,7 +9,15 @@
  * 5. POST to relay /v1/execute with user signature → relay co-signs + submits
  */
 
-const RELAY_URL = import.meta.env.VITE_GAS_RELAY_URL ?? "http://localhost:3001";
+import { protocolManifest } from "./protocol-config";
+
+function getRelayUrl(): string {
+  const relayUrl = protocolManifest.serviceUrls?.gasRelay ?? "";
+  if (!relayUrl) {
+    throw new Error("Gas relay is not configured for this deployment.");
+  }
+  return relayUrl;
+}
 const RELAY_API_KEY = import.meta.env.VITE_GAS_RELAY_API_KEY ?? "";
 
 function relayHeaders(): Record<string, string> {
@@ -40,7 +48,7 @@ export async function sponsorTransaction(
   sender: string,
   gasBudget?: number,
 ): Promise<SponsorResponse> {
-  const res = await fetch(`${RELAY_URL}/v1/sponsor`, {
+  const res = await fetch(`${getRelayUrl()}/v1/sponsor`, {
     method: "POST",
     headers: relayHeaders(),
     body: JSON.stringify({ txBytes: txKindBytes, sender, gasBudget }),
@@ -62,7 +70,7 @@ export async function executeSponsored(
   userSignature: string, // Base64 user signature
   gasCoinId: string, // Leased coin ID from sponsor response
 ): Promise<ExecuteResponse> {
-  const res = await fetch(`${RELAY_URL}/v1/execute`, {
+  const res = await fetch(`${getRelayUrl()}/v1/execute`, {
     method: "POST",
     headers: relayHeaders(),
     body: JSON.stringify({ txBytes, userSignature, gasCoinId }),
@@ -80,8 +88,13 @@ export async function executeSponsored(
  * Check relay health.
  */
 export async function checkRelayHealth(): Promise<{ status: string; healthy: boolean }> {
+  const relayUrl = protocolManifest.serviceUrls?.gasRelay ?? "";
+  if (!relayUrl) {
+    return { status: "not_configured", healthy: false };
+  }
+
   try {
-    const res = await fetch(`${RELAY_URL}/health`);
+    const res = await fetch(`${relayUrl}/health`);
     return res.json();
   } catch {
     return { status: "unreachable", healthy: false };

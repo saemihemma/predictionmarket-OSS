@@ -1,4 +1,5 @@
 import CountdownTimer from "../../components/ui/CountdownTimer";
+import { COLLATERAL_SYMBOL } from "../../lib/market-constants";
 
 interface PortfolioActionRequiredProps {
   market: any;
@@ -8,8 +9,9 @@ interface PortfolioActionRequiredProps {
   setProposalEvidence: (v: Record<string, string>) => void;
   proposalNote: Record<string, string>;
   setProposalNote: (v: Record<string, string>) => void;
-  proposalState: Record<string, boolean>;
-  setProposalState: (v: Record<string, boolean>) => void;
+  proposalSubmitting: Record<string, boolean>;
+  proposalErrors: Record<string, string | null>;
+  onSubmit: (marketId: string) => void | Promise<void>;
 }
 
 export default function PortfolioActionRequired({
@@ -20,97 +22,87 @@ export default function PortfolioActionRequired({
   setProposalEvidence,
   proposalNote,
   setProposalNote,
-  proposalState,
-  setProposalState,
+  proposalSubmitting,
+  proposalErrors,
+  onSubmit,
 }: PortfolioActionRequiredProps) {
   if (!market) return null;
 
   return (
-    <div className="bg-bg-panel border-2 border-orange-dim rounded-sm p-6 mb-4">
-      <div className="flex justify-between items-center mb-4">
-        <h3 className="text-[1.1rem] font-bold text-orange tracking-[0.1em] flex items-center gap-2 m-0">
-          ⚠ ACTION REQUIRED
+    <div className="mb-4 border-2 border-orange-dim bg-bg-panel p-4 sm:p-6">
+      <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <h3 className="m-0 flex items-center gap-2 text-[1.1rem] font-bold tracking-[0.1em] text-orange">
+          ACTION REQUIRED
         </h3>
-        <div className="text-sm font-semibold text-orange tracking-[0.06em]">
+        <div className="text-sm font-semibold tracking-[0.06em] text-orange">
           PROPOSE WITHIN: <CountdownTimer targetMs={market.resolveDeadlineMs} />
         </div>
       </div>
 
-      <div className="p-4 bg-[rgba(221,122,31,0.08)] border border-orange-dim mb-4">
-        <div className="text-base font-semibold text-text mb-2">
-          {market.title}
-        </div>
-        <div className="text-[0.95rem] text-text-muted mb-4">
-          Market closed 2 hours ago. Propose the outcome before the deadline.
+      <div className="border border-orange-dim bg-[rgba(221,122,31,0.08)] p-4">
+        <div className="mb-2 text-base font-semibold text-text">{market.title}</div>
+        <div className="mb-4 text-[0.95rem] text-text-muted">
+          Market closed. Submit the creator resolution before the deadline or the creation bond can be forfeited.
         </div>
 
         <div className="flex flex-col gap-[0.8rem]">
-          {/* Outcome selector */}
           <div>
-            <label className="text-[0.95rem] font-medium text-mint block mb-2">
-              OUTCOME
-            </label>
+            <label className="mb-2 block text-[0.95rem] font-medium text-mint">OUTCOME</label>
             <select
               value={proposalOutcome[market.id] ?? 0}
-              onChange={(e) => setProposalOutcome({ ...proposalOutcome, [market.id]: Number(e.target.value) })}
-              className="w-full px-4 py-3 text-base bg-bg-terminal text-text border border-border-panel outline-none font-mono"
+              onChange={(event) => setProposalOutcome({ ...proposalOutcome, [market.id]: Number(event.target.value) })}
+              className="touch-target min-h-11 w-full border border-border-panel bg-bg-terminal px-4 py-3 font-mono text-base text-text outline-none"
             >
-              {market.outcomeLabels.map((label: string, i: number) => (
-                <option key={i} value={i}>{label}</option>
+              {market.outcomeLabels.map((label: string, index: number) => (
+                <option key={index} value={index}>
+                  {label}
+                </option>
               ))}
             </select>
           </div>
 
-          {/* Evidence URL */}
           <div>
-            <label className="text-[0.95rem] font-medium text-mint block mb-2">
-              EVIDENCE (optional)
-            </label>
+            <label className="mb-2 block text-[0.95rem] font-medium text-mint">EVIDENCE (optional)</label>
             <input
               type="url"
               value={proposalEvidence[market.id] ?? ""}
-              onChange={(e) => setProposalEvidence({ ...proposalEvidence, [market.id]: e.target.value })}
-              placeholder="https://binance.com/eth-price..."
-              className="w-full px-4 py-3 text-base bg-bg-terminal text-text border border-border-panel outline-none font-mono"
+              onChange={(event) => setProposalEvidence({ ...proposalEvidence, [market.id]: event.target.value })}
+              placeholder="https://source.example/evidence"
+              className="touch-target min-h-11 w-full border border-border-panel bg-bg-terminal px-4 py-3 font-mono text-base text-text outline-none"
             />
-            <div className="text-sm text-text-dim mt-1">
-              Link to supporting evidence (e.g., exchange API, chart)
-            </div>
+            <div className="mt-1 text-sm text-text-dim">This URL is hashed into the proposal payload for auditability.</div>
           </div>
 
-          {/* Note field */}
           <div>
-            <label className="text-[0.95rem] font-medium text-mint block mb-2">
-              NOTE (optional)
-            </label>
+            <label className="mb-2 block text-[0.95rem] font-medium text-mint">NOTE (optional)</label>
             <textarea
               value={proposalNote[market.id] ?? ""}
-              onChange={(e) => setProposalNote({ ...proposalNote, [market.id]: e.target.value })}
+              onChange={(event) => setProposalNote({ ...proposalNote, [market.id]: event.target.value })}
               placeholder="Brief explanation for your proposal..."
-              className="w-full px-4 py-3 text-base bg-bg-terminal text-text border border-border-panel outline-none font-mono min-h-[80px] resize-vertical"
+              className="min-h-[80px] w-full resize-vertical border border-border-panel bg-bg-terminal px-4 py-3 font-mono text-base text-text outline-none"
             />
-            <div className="text-sm text-text-dim mt-1">
-              Explain your outcome choice (e.g., "ETH reached $3,142 on March 15 per Binance daily close")
-            </div>
+            <div className="mt-1 text-sm text-text-dim">Freeform context is included in the hashed evidence payload.</div>
           </div>
 
-          {/* Propose button */}
+          {proposalErrors[market.id] && (
+            <div className="border border-orange-dim bg-[rgba(221,122,31,0.08)] px-4 py-3 text-sm leading-relaxed text-orange">
+              {proposalErrors[market.id]}
+            </div>
+          )}
+
           <button
             onClick={() => {
-              setProposalState({ ...proposalState, [market.id]: true });
-              // Show success state
-              setTimeout(() => {
-                alert("Proposal submitted! Market now in RESOLUTION_PENDING state.");
-              }, 100);
+              void onSubmit(market.id);
             }}
-            className="px-4 py-3 font-mono text-sm font-semibold tracking-[0.08em] bg-[rgba(202,245,222,0.12)] text-mint border border-mint-dim cursor-pointer transition-all duration-200 hover:shadow-[0_0_12px_rgba(202,245,222,0.15)]"
+            disabled={proposalSubmitting[market.id] ?? false}
+            className="touch-target min-h-11 border border-mint-dim bg-[rgba(202,245,222,0.12)] px-4 py-3 font-mono text-sm font-semibold tracking-[0.08em] text-mint transition-all duration-200 hover:shadow-[0_0_12px_rgba(202,245,222,0.15)] disabled:cursor-not-allowed disabled:border-border-panel disabled:bg-[rgba(0,0,0,0.3)] disabled:text-text-dim"
           >
-            PROPOSE OUTCOME
+            {proposalSubmitting[market.id] ? "SUBMITTING" : "PROPOSE OUTCOME"}
           </button>
 
-          {/* Deadline warning */}
-          <div className="px-4 py-3 bg-[rgba(221,122,31,0.08)] border border-orange-dim text-sm text-orange leading-relaxed">
-            If not proposed within deadline, market becomes INVALID and your 500 SFR creation bond is forfeited.
+          <div className="border border-orange-dim bg-[rgba(221,122,31,0.08)] px-4 py-3 text-sm leading-relaxed text-orange">
+            If not proposed within deadline, market becomes INVALID and your creation bond is at risk. Bond amounts are
+            denominated in {COLLATERAL_SYMBOL}.
           </div>
         </div>
       </div>

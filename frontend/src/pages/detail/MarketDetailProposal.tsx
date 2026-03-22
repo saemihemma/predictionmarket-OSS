@@ -1,72 +1,83 @@
-/**
- * MarketDetailProposal: CLOSED state proposal form
- * Allows users to propose an outcome with optional evidence and notes
- */
-
 export default function MarketDetailProposal({
   market,
   proposedOutcome,
   setProposedOutcome,
+  proposalEvidence,
+  setProposalEvidence,
+  proposalNote,
+  setProposalNote,
+  onSubmit,
+  submitLabel,
+  helperText,
+  isSubmitting,
+  error,
 }: {
   market: any;
   proposedOutcome: number;
   setProposedOutcome: (n: number) => void;
+  proposalEvidence: string;
+  setProposalEvidence: (value: string) => void;
+  proposalNote: string;
+  setProposalNote: (value: string) => void;
+  onSubmit: () => void | Promise<void>;
+  submitLabel: string;
+  helperText: string;
+  isSubmitting: boolean;
+  error: string | null;
 }) {
   return (
-    <div className="p-4 bg-bg-panel border-2 border-orange-dim">
-      <h3 className="text-[1.1rem] font-bold text-orange mb-3 tracking-[0.1em]">PROPOSE OUTCOME</h3>
+    <div className="border-2 border-orange-dim bg-bg-panel p-4 sm:p-5">
+      <h3 className="mb-3 text-[1.1rem] font-bold tracking-[0.1em] text-orange">PROPOSE OUTCOME</h3>
 
       <div className="flex flex-col gap-3">
-        {/* Outcome selector */}
         <div>
-          <label className="text-[0.95rem] font-medium text-mint block mb-2">
-            OUTCOME
-          </label>
+          <label className="mb-2 block text-[0.95rem] font-medium text-mint">OUTCOME</label>
           <select
             value={proposedOutcome}
-            onChange={(e) => setProposedOutcome(Number(e.target.value))}
-            className="w-full px-3 py-2 text-base bg-bg-terminal text-text border border-border-panel outline-none font-mono"
+            onChange={(event) => setProposedOutcome(Number(event.target.value))}
+            className="touch-target min-h-11 w-full border border-border-panel bg-bg-terminal px-3 py-2 font-mono text-base text-text outline-none"
           >
-            {market.outcomeLabels.map((label: string, i: number) => (
-              <option key={i} value={i}>{label}</option>
+            {market.outcomeLabels.map((label: string, index: number) => (
+              <option key={index} value={index}>
+                {label}
+              </option>
             ))}
           </select>
         </div>
 
-        {/* Evidence URL */}
         <div>
-          <label className="text-[0.95rem] font-medium text-mint block mb-2">
-            EVIDENCE (optional)
-          </label>
+          <label className="mb-2 block text-[0.95rem] font-medium text-mint">EVIDENCE (optional)</label>
           <input
             type="url"
+            value={proposalEvidence}
+            onChange={(event) => setProposalEvidence(event.target.value)}
             placeholder="https://example.com/evidence..."
-            className="w-full px-3 py-2 text-base bg-bg-terminal text-text border border-border-panel outline-none font-mono"
+            className="touch-target min-h-11 w-full border border-border-panel bg-bg-terminal px-3 py-2 font-mono text-base text-text outline-none"
           />
-          <div className="text-sm text-text-dim mt-1">
-            Link to supporting evidence
-          </div>
+          <div className="mt-1 text-sm text-text-dim">{helperText}</div>
         </div>
 
-        {/* Note field */}
         <div>
-          <label className="text-[0.95rem] font-medium text-mint block mb-2">
-            NOTE (optional)
-          </label>
+          <label className="mb-2 block text-[0.95rem] font-medium text-mint">NOTE (optional)</label>
           <textarea
+            value={proposalNote}
+            onChange={(event) => setProposalNote(event.target.value)}
             placeholder="Brief explanation for your proposal..."
-            className="w-full px-3 py-2 text-base bg-bg-terminal text-text border border-border-panel outline-none font-mono min-h-20 resize-vertical"
+            className="min-h-24 w-full resize-vertical border border-border-panel bg-bg-terminal px-3 py-2 font-mono text-base text-text outline-none"
           />
-          <div className="text-sm text-text-dim mt-1">
-            Explain your outcome choice
-          </div>
+          <div className="mt-1 text-sm text-text-dim">Freeform context is hashed into the on-chain evidence payload.</div>
         </div>
 
-        {/* Submit button */}
+        {error && <div className="border border-orange-dim bg-[rgba(221,122,31,0.08)] px-3 py-2 text-sm text-orange">{error}</div>}
+
         <button
-          className="px-3 py-2 font-mono text-sm font-semibold tracking-[0.08em] bg-[rgba(202,245,222,0.12)] text-mint border border-mint-dim cursor-pointer transition-all duration-200 hover:shadow-[0_0_12px_rgba(202,245,222,0.15)]"
+          onClick={() => {
+            void onSubmit();
+          }}
+          disabled={isSubmitting}
+          className="touch-target min-h-11 border border-mint-dim bg-[rgba(202,245,222,0.12)] px-3 py-2 font-mono text-sm font-semibold tracking-[0.08em] text-mint transition-all duration-200 hover:shadow-[0_0_12px_rgba(202,245,222,0.15)] disabled:cursor-not-allowed disabled:border-border-panel disabled:bg-[rgba(0,0,0,0.3)] disabled:text-text-dim"
         >
-          PROPOSE OUTCOME
+          {isSubmitting ? "SUBMITTING" : submitLabel}
         </button>
       </div>
     </div>

@@ -1,12 +1,12 @@
 interface ResolutionStepProps {
-  trustTier: "verified" | "sourced" | "community" | "experimental";
+  trustTier: "sourceBackedCommunity" | "openCommunity";
   resolutionSourceType: string;
   resolutionSourceUri: string;
   resolutionRules: string;
   creatorControls: boolean;
-  onTrustTierChange: (
-    tier: "verified" | "sourced" | "community" | "experimental"
-  ) => void;
+  allowedSourceTypes?: string[];
+  requiredEvidenceLabel?: string | null;
+  onTrustTierChange: (tier: "sourceBackedCommunity" | "openCommunity") => void;
   onSourceTypeChange: (value: string) => void;
   onSourceUriChange: (value: string) => void;
   onRulesChange: (value: string) => void;
@@ -19,113 +19,102 @@ export default function ResolutionStep({
   resolutionSourceUri,
   resolutionRules,
   creatorControls,
+  allowedSourceTypes,
+  requiredEvidenceLabel,
   onTrustTierChange,
   onSourceTypeChange,
   onSourceUriChange,
   onRulesChange,
   onCreatorControlsChange,
 }: ResolutionStepProps) {
-  const handleTrustTierChange = (newTier: string) => {
-    const tier = newTier as "verified" | "sourced" | "community" | "experimental";
-    const BOND_TIERS: Record<string, { creation: number; dispute: number }> = {
-      verified: { creation: 250, dispute: 2500 },
-      sourced: { creation: 500, dispute: 5000 },
-      community: { creation: 1000, dispute: 7500 },
-      experimental: { creation: 2000, dispute: 10000 },
-    };
+  const sourceOptions = allowedSourceTypes ?? [];
 
-    // Auto-select source type based on trust tier
-    let sourceType = "Official API";
-    if (tier === "verified") sourceType = "On-Chain State";
-    if (tier === "sourced") sourceType = "Official API";
-    if (tier === "community" || tier === "experimental")
-      sourceType = "Manual Verifier";
+  const handleTrustTierChange = (newTier: string) => {
+    const tier = newTier as "sourceBackedCommunity" | "openCommunity";
+    const sourceType = sourceOptions[0];
 
     onTrustTierChange(tier);
-    if (sourceType !== resolutionSourceType) {
+    if (sourceType && sourceType !== resolutionSourceType) {
       onSourceTypeChange(sourceType);
     }
   };
 
+  const sourceIsExpected = trustTier === "sourceBackedCommunity";
+
   return (
     <>
       <div>
-        <label className="block text-sm font-medium text-mint mb-2">
-          Trust Tier
-        </label>
+        <label className="block text-sm font-medium text-mint mb-2">SETTLEMENT PROFILE</label>
         <select
           value={trustTier}
           onChange={(e) => handleTrustTierChange(e.target.value)}
           className="w-full p-4 text-base bg-bg-terminal text-text border border-border-panel outline-none"
         >
-          <option value="verified">
-            Verified — On-chain data resolves automatically (lowest bond)
+          <option value="sourceBackedCommunity">
+            Source-Backed Community — creator supplies sources, community settles
           </option>
-          <option value="sourced">
-            Sourced — External data source with verifiable URL
-          </option>
-          <option value="community">
-            Community — Creator proposes, community can dispute
-          </option>
-          <option value="experimental">
-            Experimental — High risk, experimental resolution (highest bond)
+          <option value="openCommunity">
+            Open Community — creator sets rules, community settles openly
           </option>
         </select>
       </div>
 
+      <div className="p-4 bg-[rgba(202,245,222,0.04)] border border-border-panel text-sm text-text-muted leading-relaxed">
+        {sourceIsExpected
+          ? "This market still resolves through creator proposal, dispute, and SDVM. The attached sources are evidence for the community, not an operator guarantee."
+          : "This market is fully community-settled. Source links are optional evidence, not a managed verifier promise."}
+      </div>
+
       <div>
-        <label className="block text-sm font-medium text-mint mb-2">
-          Source Type
-        </label>
+        <label className="block text-sm font-medium text-mint mb-2">EVIDENCE SOURCE TYPE</label>
         <select
-          value={resolutionSourceType}
+          value={sourceOptions.length > 0 ? resolutionSourceType : ""}
           onChange={(e) => onSourceTypeChange(e.target.value)}
+          disabled={sourceOptions.length === 0}
           className="w-full p-4 text-base bg-bg-terminal text-text border border-border-panel outline-none"
         >
-          <option value="Official API">Official API</option>
-          <option value="Website">Website</option>
-          <option value="On-Chain State">On-Chain State</option>
-          <option value="Verified Snapshot">Verified Snapshot</option>
-          <option value="Manual Verifier">Manual Verifier</option>
+          {sourceOptions.length === 0 && (
+            <option value="" disabled>
+              LOADING LIVE POLICY...
+            </option>
+          )}
+          {sourceOptions.map((option) => (
+            <option key={option} value={option}>
+              {option}
+            </option>
+          ))}
         </select>
+        {requiredEvidenceLabel && (
+          <div className="mt-2 text-xs text-text-dim">
+            Live policy requires <span className="text-mint">{requiredEvidenceLabel}</span> evidence for this profile.
+          </div>
+        )}
       </div>
 
       <div>
         <label className="block text-sm font-medium text-mint mb-2">
-          Primary Source URL
+          PRIMARY SOURCE URL {sourceIsExpected ? "(REQUIRED)" : "(OPTIONAL)"}
         </label>
         <input
           type="text"
           value={resolutionSourceUri}
           onChange={(e) => onSourceUriChange(e.target.value)}
-          placeholder="https://api.example.com/events/..."
+          placeholder="https://example.com/source"
           className="w-full p-4 text-base bg-bg-terminal text-text border border-border-panel outline-none"
         />
       </div>
 
       <div>
-        <label className="block text-sm font-medium text-mint mb-2">
-          Resolution Rules
-        </label>
+        <label className="block text-sm font-medium text-mint mb-2">RESOLUTION RULES</label>
         <textarea
           value={resolutionRules}
           onChange={(e) => onRulesChange(e.target.value)}
-          placeholder={
-            "Resolves YES if [condition]. Resolves NO if [condition]. Source: [URL]. Edge cases: [describe]."
-          }
-          rows={3}
+          placeholder="State exactly what resolves each outcome, which evidence wins if sources conflict, and how edge cases are handled."
+          rows={4}
           className="w-full p-3.5 text-sm bg-bg-terminal text-text border border-border-panel outline-none resize-none"
         />
         <div className="text-xs italic text-text-dim mt-1">
-          {resolutionSourceType === "Official API" &&
-            "e.g., Resolves on `winner` field from api.example.com/events/123"}
-          {resolutionSourceType === "Website" &&
-            "e.g., Result posted at example.com/events/123, 2+ sources if disputed"}
-          {resolutionSourceType === "On-Chain State" &&
-            "e.g., SnapshotRecord for system_id=456. Deterministic, no human judgment."}
-          {(resolutionSourceType === "Verified Snapshot" ||
-            resolutionSourceType === "Manual Verifier") &&
-            "Provide clear, verifiable criteria."}
+          Use explicit outcome criteria. This is what the creator/community/dispute flow will point back to later.
         </div>
       </div>
 
@@ -137,11 +126,10 @@ export default function ResolutionStep({
             onChange={(e) => onCreatorControlsChange(e.target.checked)}
             className="mt-1 cursor-pointer"
           />
-          <span>Creator controls or influences this source?</span>
+          <span>Creator controls or materially influences the referenced source</span>
         </label>
         <div className="text-xs text-text-muted mt-1 ml-6">
-          Check if you have control over, manage, or influence the resolution
-          source.
+          Required if you control the source, can change it, or have privileged access that could affect the outcome.
         </div>
       </div>
     </>

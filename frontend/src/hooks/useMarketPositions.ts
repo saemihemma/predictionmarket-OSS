@@ -5,7 +5,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { useCurrentAccount } from "@mysten/dapp-kit-react";
-import { suiClient } from "../lib/client";
+import { protocolReadTransport } from "../lib/client";
 import { PM_POSITION_TYPE } from "../lib/market-constants";
 import { type Position } from "../lib/market-types";
 import { POLL_INTERVAL_ACTIVE_MS, STALE_TIME_ACTIVE_MS } from "../lib/polling-constants";
@@ -32,13 +32,12 @@ function parsePosition(obj: unknown): Position | null {
 }
 
 async function fetchPositions(owner: string, marketId?: string): Promise<Position[]> {
-  const result = await suiClient.getOwnedObjects({
+  const result = await protocolReadTransport.listOwnedObjects({
     owner,
-    filter: { StructType: PM_POSITION_TYPE },
-    options: { showContent: true },
+    type: PM_POSITION_TYPE,
   });
 
-  const positions = (result.data ?? [])
+  const positions = result
     .map((obj) => parsePosition(obj))
     .filter((p): p is Position => p !== null);
 

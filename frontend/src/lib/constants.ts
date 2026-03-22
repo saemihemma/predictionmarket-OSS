@@ -16,7 +16,7 @@ export const SIMULATION_VERIFIER_POLL_INTERVAL_MS = Number(
 export const VERIFIER_SNAPSHOT_URL = LIVE_VERIFIER_SNAPSHOT_URL;
 export const VERIFIER_POLL_INTERVAL_MS = LIVE_VERIFIER_POLL_INTERVAL_MS;
 
-export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:3001";
+export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
 
 export const CONTROL_STATE_NEUTRAL = 0;
 export const CONTROL_STATE_CONTESTED = 1;

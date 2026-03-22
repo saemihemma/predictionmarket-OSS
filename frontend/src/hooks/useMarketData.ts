@@ -1,93 +1,64 @@
-/**
- * Data hooks — unified interface for market and position data.
- *
- * When ENABLE_MOCK_DATA is true (see lib/mock/config.ts), returns sample data.
- * When false (default), fetches from Sui GraphQL.
- * See USE_MOCK_DATA.md for details.
- *
- * Pages consume these hooks and never import mock data directly.
- */
-
 import { useState, useEffect, useCallback } from "react";
-import { Market } from "../lib/market-types";
-import { parseMarketFromSuiObject } from "../lib/market-types";
-import { ENABLE_MOCK_DATA } from "../lib/mock/config";
-import { getMockMarket, mockMarkets } from "../lib/mock/markets";
-import { mockPositions as MOCK_POSITIONS } from "../lib/mock/positions";
-import { graphqlQuery } from "../lib/graphql-client";
-import { MARKETS_QUERY, MARKET_DETAIL_QUERY, OWNER_OBJECTS_QUERY } from "../lib/graphql-queries";
-import { EVENT_MARKET_CREATED, PM_MARKET_TYPE } from "../lib/market-constants";
+import { Market, MarketState, parseMarketFromSuiObject } from "../lib/market-types";
+import { PM_POSITION_TYPE } from "../lib/market-constants";
+import { fetchProtocolRuntimeConfig } from "../lib/protocol-runtime";
+import { protocolReadTransport } from "../lib/client";
 
 export interface Position {
+  positionId: string;
   marketId: string;
   marketTitle: string;
   outcome: string;
+  outcomeIndex: number;
   shares: bigint;
   value: bigint;
   pnl: bigint;
+  netCostBasis: bigint;
+  claimableValue: bigint;
+  claimAction: "claim" | "refund_invalid" | null;
   state: "open" | "resolved" | "claimable";
 }
 
 const POLL_INTERVAL_MS = 30_000;
+const MARKET_BATCH_SIZE = 50;
 
-// ── useAllMarkets ──────────────────────────────────────────────────────
+function chunkArray<T>(items: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let index = 0; index < items.length; index += size) {
+    chunks.push(items.slice(index, index + size));
+  }
+  return chunks;
+}
 
-interface MarketsQueryResponse {
-  events: {
-    edges: Array<{
-      node: { parsedJson: any; timestamp: string };
-      cursor: string;
-    }>;
-    pageInfo: { hasNextPage: boolean; endCursor: string | null };
-  };
+async function fetchMarketObjects(marketIds: string[]): Promise<Market[]> {
+  const uniqueMarketIds = [...new Set(marketIds.filter(Boolean))];
+  if (uniqueMarketIds.length === 0) {
+    return [];
+  }
+
+  const marketBatches = chunkArray(uniqueMarketIds, MARKET_BATCH_SIZE);
+  const batchResults = await Promise.all(
+    marketBatches.map((ids) => protocolReadTransport.getObjects(ids)),
+  );
+
+  return batchResults
+    .flat()
+    .map((result) => parseMarketFromSuiObject(result))
+    .filter((market): market is Market => market !== null);
 }
 
 export function useAllMarkets() {
-  const [markets, setMarkets] = useState<Market[]>(ENABLE_MOCK_DATA ? (mockMarkets as Market[]) : []);
-  const [isLoading, setIsLoading] = useState(!ENABLE_MOCK_DATA);
+  const [markets, setMarkets] = useState<Market[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
 
   const fetchMarkets = useCallback(async () => {
-    if (ENABLE_MOCK_DATA) return;
     try {
-      // Step 1: Query MarketCreatedEvent events to discover market IDs
-      const data = await graphqlQuery<MarketsQueryResponse>(MARKETS_QUERY, {
-        eventType: EVENT_MARKET_CREATED,
-        first: 100,
-      });
-
-      const marketIds = data.events.edges
-        .map((e) => e.node.parsedJson?.market_id)
-        .filter(Boolean) as string[];
-
-      if (marketIds.length === 0) {
-        setMarkets([]);
-        setError(null);
-        return;
-      }
-
-      // Step 2: Batch fetch market objects via individual GraphQL queries
-      // (multiGetObjects not available in GraphQL — fetch individually and parse)
-      const marketPromises = marketIds.map((id) =>
-        graphqlQuery<{ object: any }>(MARKET_DETAIL_QUERY, { id }).catch(() => null)
-      );
-      const results = await Promise.all(marketPromises);
-
-      const parsed = results
-        .filter(Boolean)
-        .map((r) => {
-          try {
-            return parseMarketFromSuiObject(r!.object);
-          } catch {
-            return null;
-          }
-        })
-        .filter(Boolean) as Market[];
-
-      setMarkets(parsed);
+      const marketIds = await protocolReadTransport.listMarketIds();
+      setMarkets(await fetchMarketObjects(marketIds));
       setError(null);
-    } catch (e) {
-      setError(e as Error);
+    } catch (fetchError) {
+      setError(fetchError as Error);
     } finally {
       setIsLoading(false);
     }
@@ -95,37 +66,58 @@ export function useAllMarkets() {
 
   useEffect(() => {
     fetchMarkets();
-    if (!ENABLE_MOCK_DATA) {
-      const id = setInterval(fetchMarkets, POLL_INTERVAL_MS);
-      return () => clearInterval(id);
-    }
+    const intervalId = setInterval(fetchMarkets, POLL_INTERVAL_MS);
+    return () => clearInterval(intervalId);
   }, [fetchMarkets]);
 
   return { markets, isLoading, error, refetch: fetchMarkets };
 }
 
-// ── useMarketData ──────────────────────────────────────────────────────
+function enrichMarket(market: Market, creatorPriorityWindowMs: number) {
+  const creatorPriorityDeadlineMs = market.closeTimeMs + creatorPriorityWindowMs;
+  const timeUntilCommunityCanProposeMs = Math.max(0, creatorPriorityDeadlineMs - Date.now());
+
+  return {
+    ...market,
+    creatorPriorityWindowMs,
+    creatorPriorityDeadlineMs,
+    timeUntilCommunityCanProposeMs,
+  } as Market & {
+    creatorPriorityDeadlineMs: number;
+    timeUntilCommunityCanProposeMs: number;
+  };
+}
 
 export function useMarketData(id: string) {
-  const [market, setMarket] = useState<(Market & { creatorPriorityDeadlineMs: number; timeUntilCommunityCanProposeMs: number; resolveDeadlineMs: number }) | undefined>(() => {
-    if (!ENABLE_MOCK_DATA) return undefined;
-    const m = getMockMarket(id);
-    return m ? enrichMarket(m) : undefined;
-  });
-  const [isLoading, setIsLoading] = useState(!ENABLE_MOCK_DATA);
+  const [market, setMarket] = useState<
+    (Market & { creatorPriorityDeadlineMs: number; timeUntilCommunityCanProposeMs: number }) | undefined
+  >(undefined);
+  const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
 
   const fetchMarket = useCallback(async () => {
-    if (ENABLE_MOCK_DATA) return;
+    if (!id) {
+      setMarket(undefined);
+      setError(null);
+      setIsLoading(false);
+      return;
+    }
+
     try {
-      const data = await graphqlQuery<{ object: any }>(MARKET_DETAIL_QUERY, { id });
-      const parsed = parseMarketFromSuiObject(data.object);
+      const [data, protocolConfig] = await Promise.all([
+        protocolReadTransport.getObject(id),
+        fetchProtocolRuntimeConfig(),
+      ]);
+
+      const parsed = parseMarketFromSuiObject(data);
       if (parsed) {
-        setMarket(enrichMarket(parsed));
+        setMarket(enrichMarket(parsed, protocolConfig.creatorPriorityWindowMs));
+      } else {
+        setMarket(undefined);
       }
       setError(null);
-    } catch (e) {
-      setError(e as Error);
+    } catch (fetchError) {
+      setError(fetchError as Error);
     } finally {
       setIsLoading(false);
     }
@@ -133,78 +125,174 @@ export function useMarketData(id: string) {
 
   useEffect(() => {
     fetchMarket();
-    if (!ENABLE_MOCK_DATA) {
-      const interval = setInterval(fetchMarket, POLL_INTERVAL_MS);
-      return () => clearInterval(interval);
-    }
+    const intervalId = setInterval(fetchMarket, POLL_INTERVAL_MS);
+    return () => clearInterval(intervalId);
   }, [fetchMarket]);
 
   return { market, isLoading, error, refetch: fetchMarket };
 }
 
-function enrichMarket(m: Market) {
-  const creatorPriorityDeadlineMs = m.closeTimeMs + (m.creatorPriorityWindowMs || 86400000);
-  const timeUntilCommunityCanProposeMs = Math.max(0, creatorPriorityDeadlineMs - Date.now());
-  const resolveDeadlineMs = m.closeTimeMs + (72 * 60 * 60 * 1000);
-  return { ...m, creatorPriorityDeadlineMs, timeUntilCommunityCanProposeMs, resolveDeadlineMs } as Market & {
-    creatorPriorityDeadlineMs: number;
-    timeUntilCommunityCanProposeMs: number;
-    resolveDeadlineMs: number;
-  };
+interface RawPosition {
+  id: string;
+  marketId: string;
+  owner: string;
+  outcomeIndex: number;
+  quantity: bigint;
+  netCostBasis: bigint;
+  createdAtMs: number;
 }
 
-// ── usePortfolio ───────────────────────────────────────────────────────
-
-interface PositionQueryResponse {
-  objects: {
-    edges: Array<{
-      node: {
-        address: string;
-        asMoveObject: {
-          contents: {
-            fields: Record<string, any>;
-          };
+function parseOwnedPosition(entry: unknown): RawPosition | null {
+  try {
+    const item = entry as {
+      data?: {
+        objectId?: string;
+        content?: {
+          fields?: Record<string, unknown>;
         };
       };
-      cursor: string;
-    }>;
-    pageInfo: { hasNextPage: boolean; endCursor: string | null };
+    };
+    const fields = item.data?.content?.fields;
+    if (!fields) return null;
+
+    return {
+      id: item.data?.objectId ?? String((fields.id as { id?: string } | undefined)?.id ?? ""),
+      marketId: String(fields.market_id ?? ""),
+      owner: String(fields.owner ?? ""),
+      outcomeIndex: Number(fields.outcome_index ?? 0),
+      quantity: BigInt(String(fields.quantity ?? 0)),
+      netCostBasis: BigInt(String(fields.net_cost_basis ?? 0)),
+      createdAtMs: Number(fields.created_at_ms ?? 0),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function applyFee(amount: bigint, feeBps: bigint): bigint {
+  if (amount <= 0n || feeBps <= 0n) {
+    return amount;
+  }
+
+  const fee = (amount * feeBps) / 10_000n;
+  const normalizedFee = fee === 0n ? 1n : fee;
+  return amount > normalizedFee ? amount - normalizedFee : 0n;
+}
+
+function computeInvalidRefund(position: RawPosition, market: Market): bigint {
+  if (market.invalidationSnapshotCollateral == null || market.totalCostBasisSum <= 0n) {
+    return 0n;
+  }
+
+  return (position.netCostBasis * market.invalidationSnapshotCollateral) / market.totalCostBasisSum;
+}
+
+function enrichPortfolioPosition(
+  position: RawPosition,
+  market: Market | null | undefined,
+  settlementFeeBps: bigint,
+): Position {
+  if (!market) {
+    return {
+      positionId: position.id,
+      marketId: position.marketId,
+      marketTitle: position.marketId,
+      outcome: `Outcome ${position.outcomeIndex}`,
+      outcomeIndex: position.outcomeIndex,
+      shares: position.quantity,
+      value: position.quantity,
+      pnl: 0n,
+      netCostBasis: position.netCostBasis,
+      claimableValue: 0n,
+      claimAction: null,
+      state: "open",
+    };
+  }
+
+  let value = position.quantity;
+  let pnl = 0n;
+  let claimableValue = 0n;
+  let claimAction: "claim" | "refund_invalid" | null = null;
+  let state: Position["state"] = "open";
+
+  if (market.state === MarketState.RESOLVED && market.resolution?.finalized) {
+    state = "resolved";
+    if (position.outcomeIndex === market.resolution.resolvedOutcome) {
+      claimableValue = applyFee(position.quantity, settlementFeeBps);
+      value = claimableValue;
+      pnl = claimableValue - position.netCostBasis;
+      claimAction = "claim";
+      state = "claimable";
+    } else {
+      value = 0n;
+      pnl = -position.netCostBasis;
+    }
+  } else if (market.state === MarketState.INVALID) {
+    claimableValue = computeInvalidRefund(position, market);
+    value = claimableValue;
+    pnl = claimableValue - position.netCostBasis;
+    claimAction = "refund_invalid";
+    state = "claimable";
+  }
+
+  return {
+    positionId: position.id,
+    marketId: position.marketId,
+    marketTitle: market.title || position.marketId,
+    outcome: market.outcomeLabels[position.outcomeIndex] ?? `Outcome ${position.outcomeIndex}`,
+    outcomeIndex: position.outcomeIndex,
+    shares: position.quantity,
+    value,
+    pnl,
+    netCostBasis: position.netCostBasis,
+    claimableValue,
+    claimAction,
+    state,
   };
 }
 
 export function usePortfolio(userAddress?: string) {
-  const [positions, setPositions] = useState<Position[]>(ENABLE_MOCK_DATA ? MOCK_POSITIONS : []);
-  const [isLoading, setIsLoading] = useState(!ENABLE_MOCK_DATA && !!userAddress);
+  const [positions, setPositions] = useState<Position[]>([]);
+  const [isLoading, setIsLoading] = useState(!!userAddress);
   const [error, setError] = useState<Error | null>(null);
 
   const fetchPositions = useCallback(async () => {
-    if (ENABLE_MOCK_DATA || !userAddress) return;
+    if (!userAddress) {
+      setPositions([]);
+      setIsLoading(false);
+      return;
+    }
+
     try {
-      const data = await graphqlQuery<PositionQueryResponse>(OWNER_OBJECTS_QUERY, {
-        owner: userAddress,
-        filter: { type: PM_MARKET_TYPE.replace("PMMarket", "PMPosition") },
-        first: 50,
+      const [owned, protocolConfig] = await Promise.all([
+        protocolReadTransport.listOwnedObjects({
+          owner: userAddress,
+          type: PM_POSITION_TYPE,
+        }),
+        fetchProtocolRuntimeConfig(),
+      ]);
+
+      const rawPositions = owned
+        .map((entry) => parseOwnedPosition(entry))
+        .filter((position): position is RawPosition => position !== null);
+
+      const marketIds = [...new Set(rawPositions.map((position) => position.marketId).filter(Boolean))];
+      const marketResults = await fetchMarketObjects(marketIds);
+
+      const markets = new Map<string, Market>();
+      marketResults.forEach((market) => {
+        markets.set(market.id, market);
       });
 
-      // Parse position objects — each needs parent market context for title/outcome
-      // For now, return raw position data; market enrichment happens when useAllMarkets is available
-      const parsed: Position[] = data.objects.edges.map((edge) => {
-        const f = edge.node.asMoveObject?.contents?.fields ?? {};
-        return {
-          marketId: f.marketId ?? "",
-          marketTitle: f.marketId ?? "", // enriched later when market data available
-          outcome: String(f.outcomeIndex ?? 0),
-          shares: BigInt(f.quantity ?? 0),
-          value: 0n, // computed from pool state
-          pnl: 0n, // computed from cost basis
-          state: "open" as const,
-        };
-      });
-
-      setPositions(parsed);
+      const settlementFeeBps = BigInt(protocolConfig.settlementFeeBps);
+      setPositions(
+        rawPositions.map((position) =>
+          enrichPortfolioPosition(position, markets.get(position.marketId), settlementFeeBps),
+        ),
+      );
       setError(null);
-    } catch (e) {
-      setError(e as Error);
+    } catch (fetchError) {
+      setError(fetchError as Error);
     } finally {
       setIsLoading(false);
     }
@@ -212,40 +300,12 @@ export function usePortfolio(userAddress?: string) {
 
   useEffect(() => {
     fetchPositions();
-    if (!ENABLE_MOCK_DATA && userAddress) {
-      const id = setInterval(fetchPositions, POLL_INTERVAL_MS);
-      return () => clearInterval(id);
+    if (!userAddress) {
+      return;
     }
-  }, [fetchPositions]);
+    const intervalId = setInterval(fetchPositions, POLL_INTERVAL_MS);
+    return () => clearInterval(intervalId);
+  }, [fetchPositions, userAddress]);
 
   return { positions, isLoading, error, refetch: fetchPositions };
-}
-
-// ── useMarketStats ─────────────────────────────────────────────────────
-
-export function useMarketStats() {
-  const { markets, isLoading, error } = useAllMarkets();
-
-  if (markets.length === 0 && !ENABLE_MOCK_DATA) {
-    return {
-      totalMarkets: 0,
-      totalVolume: "0",
-      activeTraders: 0,
-      network: "TESTNET",
-      isLoading,
-      error,
-    };
-  }
-
-  const uniqueCreators = new Set(markets.map((m) => m.creator).filter(Boolean));
-  const totalVolume = markets.reduce((sum, m) => sum + m.totalCollateral, 0n);
-
-  return {
-    totalMarkets: markets.length,
-    totalVolume: Number(totalVolume).toLocaleString(),
-    activeTraders: uniqueCreators.size,
-    network: "TESTNET",
-    isLoading,
-    error,
-  };
 }

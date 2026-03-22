@@ -14,8 +14,7 @@
  * Where bcs_serialize_u16 is little-endian: [outcome & 0xFF, (outcome >> 8) & 0xFF]
  */
 
-import { sha3_256 } from "@noble/hashes/sha3";
-import { bcs } from "@mysten/sui/bcs";
+import { sha3_256 } from "@noble/hashes/sha3.js";
 
 /**
  * Special outcome value representing explicit abstention.

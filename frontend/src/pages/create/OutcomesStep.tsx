@@ -1,5 +1,4 @@
-import { MarketType, MARKET_TYPE_LABELS } from "../../lib/market-types";
-import TerminalNumberInput from "../../components/ui/TerminalNumberInput";
+import { MarketType } from "../../lib/market-types";
 
 interface OutcomesStepProps {
   marketType: MarketType;
@@ -16,16 +15,11 @@ export default function OutcomesStep({
 }: OutcomesStepProps) {
   const handleMarketTypeChange = (newTypeValue: string) => {
     const newType = Number(newTypeValue) as MarketType;
-    let newOutcomes: string[] = [];
     if (newType === MarketType.BINARY) {
-      newOutcomes = ["YES", "NO"];
+      onMarketTypeChange(newType, ["YES", "NO"]);
     } else if (newType === MarketType.CATEGORICAL) {
-      newOutcomes = ["", "", ""];
-    } else if (newType === 2) {
-      // BUCKETED_SCALAR
-      newOutcomes = [];
+      onMarketTypeChange(newType, ["", "", ""]);
     }
-    onMarketTypeChange(newType, newOutcomes);
   };
 
   return (
@@ -39,10 +33,12 @@ export default function OutcomesStep({
           onChange={(e) => handleMarketTypeChange(e.target.value)}
           className="w-full p-4 text-base bg-bg-terminal text-text border border-border-panel outline-none"
         >
-          <option value="0">Yes / No — Simple two-outcome market</option>
-          <option value="1">Multiple Choice — 3-8 custom outcomes</option>
-          <option value="2">Range Market — Bet on a numeric range</option>
+          <option value="0">Yes / No - Simple two-outcome market</option>
+          <option value="1">Multiple Choice - 3-8 custom outcomes</option>
         </select>
+        <div className="mt-2 text-xs text-text-muted leading-relaxed">
+          Public beta creation supports binary and categorical markets only.
+        </div>
       </div>
 
       <div>
@@ -100,44 +96,6 @@ export default function OutcomesStep({
                 + ADD OUTCOME
               </button>
             )}
-          </div>
-        )}
-
-        {/* Bucketed Scalar market */}
-        {marketType === 2 && (
-          <div className="flex flex-col gap-3.5 mt-2">
-            <div className="p-4 bg-[rgba(202,245,222,0.04)] border border-border-panel text-sm text-text-muted leading-relaxed">
-              <div className="mb-3.5">
-                Define a numeric range. The range will be split into equal
-                buckets. Traders bet on which bucket the actual value falls in.
-              </div>
-              <div className="text-[0.85rem] italic">
-                Example: Min: 0, Max: 100, Buckets: 4 → [0-25), [25-50),
-                [50-75), [75-100]
-              </div>
-            </div>
-            <TerminalNumberInput
-              value=""
-              onChange={() => {}}
-              label="Min Value"
-              placeholder="0"
-              min={0}
-            />
-            <TerminalNumberInput
-              value=""
-              onChange={() => {}}
-              label="Max Value"
-              placeholder="100"
-              min={0}
-            />
-            <TerminalNumberInput
-              value=""
-              onChange={() => {}}
-              label="Number of Buckets"
-              placeholder="4"
-              min={2}
-              max={20}
-            />
           </div>
         )}
       </div>

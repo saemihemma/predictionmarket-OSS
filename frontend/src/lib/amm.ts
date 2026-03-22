@@ -185,7 +185,7 @@ export function computeAveragePrice(
  * DEPRECATED: Use computeProductExceptIterative instead.
  * Kept for backward compatibility.
  */
-function computeProductExcept(quantities: bigint[], excludeIndex: number): bigint {
+export function computeProductExcept(quantities: bigint[], excludeIndex: number): bigint {
   return computeProductExceptIterative(quantities, excludeIndex);
 }
 
@@ -207,7 +207,7 @@ function computeProductExceptIterative(quantities: bigint[], excludeIndex: numbe
   return product;
 }
 
-function computeAvgOtherReserves(quantities: bigint[], excludeIndex: number): bigint {
+export function computeAvgOtherReserves(quantities: bigint[], excludeIndex: number): bigint {
   let sum = 0n;
   let count = 0;
   for (let i = 0; i < quantities.length; i++) {

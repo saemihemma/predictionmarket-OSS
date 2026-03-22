@@ -1,6 +1,6 @@
 /**
  * Hook for executing sponsored transactions via the gas relay.
- * Falls back to direct wallet execution if relay is unavailable.
+ * Live-beta sponsored flows fail closed if the relay is unavailable.
  *
  * Usage:
  *   const { executeSponsoredTx } = useSponsoredTransaction();
@@ -72,24 +72,15 @@ export function useSponsoredTransaction() {
           const result = await executeRelay(sponsored.txBytes, signature, sponsored.gasCoinId);
           return { digest: result.digest };
         } catch (err) {
-          console.warn("[sponsored-tx] Relay failed, falling back to direct:", err);
+          console.warn("[sponsored-tx] Relay execution failed:", err);
           relayHealthy.current = false;
-          // Fall through to direct execution
+          throw new Error(
+            `Sponsored execution unavailable: ${err instanceof Error ? err.message : String(err)}`,
+          );
         }
       }
 
-      // Fallback: direct wallet execution (user pays SUI gas)
-      try {
-        const result = await dappKit.signAndExecuteTransaction({
-          transaction: tx,
-          options: { showEffects: true },
-        });
-        return { digest: result.digest };
-      } catch (fallbackErr) {
-        throw new Error(
-          `Transaction failed (direct execution): ${fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr)}`
-        );
-      }
+      throw new Error("Sponsored execution unavailable: gas relay is not healthy or not configured.");
     },
     [dappKit, account, ensureHealthChecked],
   );

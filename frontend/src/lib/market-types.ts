@@ -27,10 +27,10 @@ export const TrustTier = {
 export type TrustTier = (typeof TrustTier)[keyof typeof TrustTier];
 
 export const TRUST_TIER_LABELS: Record<TrustTier, string> = {
-  [TrustTier.CANONICAL]: "VERIFIED",
-  [TrustTier.SOURCE_BOUND]: "SOURCED",
-  [TrustTier.CREATOR_RESOLVED]: "COMMUNITY",
-  [TrustTier.EXPERIMENTAL]: "EXPERIMENTAL",
+  [TrustTier.CANONICAL]: "CANONICAL",
+  [TrustTier.SOURCE_BOUND]: "SOURCE-BOUND",
+  [TrustTier.CREATOR_RESOLVED]: "SOURCE-BACKED COMMUNITY",
+  [TrustTier.EXPERIMENTAL]: "OPEN COMMUNITY",
 };
 
 export const MarketState = {
@@ -326,56 +326,138 @@ export function parseMarketFromSuiObject(
     const fields = obj?.data?.content?.fields;
     if (!fields) return null;
 
-    const sd = fields.source_declaration?.fields ?? {};
-    const ci = fields.creator_influence?.fields ?? {};
+    const read = (snake: string, camel?: string) => fields[snake] ?? (camel ? fields[camel] : undefined);
+    const asBigIntInput = (value: unknown): string | number | bigint => {
+      if (typeof value === "string" || typeof value === "number" || typeof value === "bigint") {
+        return value;
+      }
+      if (value && typeof value === "object" && "value" in (value as Record<string, unknown>)) {
+        return asBigIntInput((value as { value?: unknown }).value ?? 0);
+      }
+      return 0;
+    };
+    const unwrapOption = (value: unknown) => {
+      if (
+        value &&
+        typeof value === "object" &&
+        "vec" in (value as Record<string, unknown>) &&
+        Array.isArray((value as { vec?: unknown[] }).vec)
+      ) {
+        const vec = (value as { vec: unknown[] }).vec;
+        return vec.length > 0 ? vec[0] : null;
+      }
+      return value ?? null;
+    };
+
+    const readScalar = (snake: string, camel?: string) => read(snake, camel);
+    const sourceDeclaration = read("source_declaration", "sourceDeclaration");
+    const creatorInfluence = read("creator_influence", "creatorInfluence");
+    const sd = sourceDeclaration?.fields ?? sourceDeclaration ?? {};
+    const ci = creatorInfluence?.fields ?? creatorInfluence ?? {};
+    const totalCollateral = read("total_collateral", "totalCollateral");
+    const accruedFees = read("accrued_fees", "accruedFees");
+    const resolution = unwrapOption(read("resolution"));
+    const invalidationSnapshotCollateral = unwrapOption(
+      read("invalidation_snapshot_collateral", "invalidationSnapshotCollateral"),
+    );
 
     return {
       id: obj.data.objectId ?? fields.id?.id ?? "",
-      marketNumber: Number(fields.market_number ?? 0),
-      creator: String(fields.creator ?? ""),
-      title: String(fields.title ?? ""),
-      description: String(fields.description ?? ""),
-      resolutionText: String(fields.resolution_text ?? ""),
-      marketType: Number(fields.market_type ?? 0) as MarketType,
-      resolutionClass: Number(fields.resolution_class ?? 0) as ResolutionClass,
-      trustTier: Number(fields.trust_tier ?? 0) as TrustTier,
-      outcomeCount: Number(fields.outcome_count ?? 2),
-      outcomeLabels: Array.isArray(fields.outcome_labels) ? fields.outcome_labels.map(String) : [],
+      marketNumber: Number(readScalar("market_number", "marketNumber") ?? 0),
+      creator: String(readScalar("creator") ?? ""),
+      title: String(readScalar("title") ?? ""),
+      description: String(readScalar("description") ?? ""),
+      resolutionText: String(readScalar("resolution_text", "resolutionText") ?? ""),
+      marketType: Number(readScalar("market_type", "marketType") ?? 0) as MarketType,
+      resolutionClass: Number(readScalar("resolution_class", "resolutionClass") ?? 0) as ResolutionClass,
+      trustTier: Number(readScalar("trust_tier", "trustTier") ?? 0) as TrustTier,
+      outcomeCount: Number(readScalar("outcome_count", "outcomeCount") ?? 2),
+      outcomeLabels: Array.isArray(readScalar("outcome_labels", "outcomeLabels"))
+        ? (readScalar("outcome_labels", "outcomeLabels") as unknown[]).map(String)
+        : [],
       sourceDeclaration: {
-        sourceClass: Number(sd.source_class ?? 0) as SourceClass,
-        sourceUri: String(sd.source_uri ?? ""),
-        sourceDescription: String(sd.source_description ?? ""),
-        evidenceFormat: Number(sd.evidence_format ?? 0) as EvidenceFormat,
-        sourceArchived: Boolean(sd.source_archived),
-        creatorControlsSource: Boolean(sd.creator_controls_source),
-        verifierSubmissionRequired: Boolean(sd.verifier_submission_required),
-        fallbackOnSourceUnavailable: Number(sd.fallback_on_source_unavailable ?? 0) as SourceFallback,
+        sourceClass: Number(sd.source_class ?? sd.sourceClass ?? 0) as SourceClass,
+        sourceUri: String(sd.source_uri ?? sd.sourceUri ?? ""),
+        sourceDescription: String(sd.source_description ?? sd.sourceDescription ?? ""),
+        evidenceFormat: Number(sd.evidence_format ?? sd.evidenceFormat ?? 0) as EvidenceFormat,
+        sourceArchived: Boolean(sd.source_archived ?? sd.sourceArchived),
+        creatorControlsSource: Boolean(sd.creator_controls_source ?? sd.creatorControlsSource),
+        verifierSubmissionRequired: Boolean(
+          sd.verifier_submission_required ?? sd.verifierSubmissionRequired,
+        ),
+        fallbackOnSourceUnavailable: Number(
+          sd.fallback_on_source_unavailable ?? sd.fallbackOnSourceUnavailable ?? 0,
+        ) as SourceFallback,
       },
       creatorInfluence: {
-        influenceLevel: Number(ci.influence_level ?? 0) as CreatorInfluenceLevel,
-        isSourceController: Boolean(ci.creator_is_source_controller),
-        disclosureText: String(ci.disclosure_text ?? ""),
+        influenceLevel: Number(ci.influence_level ?? ci.influenceLevel ?? 0) as CreatorInfluenceLevel,
+        isSourceController: Boolean(ci.creator_is_source_controller ?? ci.creatorIsSourceController),
+        disclosureText: String(ci.disclosure_text ?? ci.disclosureText ?? ""),
       },
-      closeTimeMs: Number(fields.close_time_ms ?? 0),
-      resolveDeadlineMs: Number(fields.resolve_deadline_ms ?? 0),
-      disputeWindowMs: Number(fields.dispute_window_ms ?? 0),
-      state: Number(fields.state ?? 0) as MarketState,
-      frozen: Boolean(fields.frozen),
-      createdAtMs: Number(fields.created_at_ms ?? 0),
-      outcomeQuantities: Array.isArray(fields.outcome_quantities)
-        ? fields.outcome_quantities.map((v: string | number) => BigInt(v))
+      closeTimeMs: Number(readScalar("close_time_ms", "closeTimeMs") ?? 0),
+      resolveDeadlineMs: Number(readScalar("resolve_deadline_ms", "resolveDeadlineMs") ?? 0),
+      disputeWindowMs: Number(readScalar("dispute_window_ms", "disputeWindowMs") ?? 0),
+      state: Number(readScalar("state") ?? 0) as MarketState,
+      frozen: Boolean(readScalar("frozen")),
+      createdAtMs: Number(readScalar("created_at_ms", "createdAtMs") ?? 0),
+      outcomeQuantities: Array.isArray(readScalar("outcome_quantities", "outcomeQuantities"))
+        ? (readScalar("outcome_quantities", "outcomeQuantities") as Array<string | number>).map((v) =>
+            BigInt(v),
+          )
         : [],
-      totalCollateral: BigInt(fields.total_collateral?.fields?.value ?? fields.total_collateral ?? 0),
-      accruedFees: BigInt(fields.accrued_fees?.fields?.value ?? fields.accrued_fees ?? 0),
-      totalCostBasisSum: BigInt(fields.total_cost_basis_sum ?? 0),
-      invalidationSnapshotCollateral: fields.invalidation_snapshot_collateral != null
-        ? BigInt(fields.invalidation_snapshot_collateral)
+      totalCollateral: BigInt(asBigIntInput(totalCollateral?.fields?.value ?? totalCollateral ?? 0)),
+      accruedFees: BigInt(asBigIntInput(accruedFees?.fields?.value ?? accruedFees ?? 0)),
+      totalCostBasisSum: BigInt(readScalar("total_cost_basis_sum", "totalCostBasisSum") ?? 0),
+      invalidationSnapshotCollateral: invalidationSnapshotCollateral != null
+        ? BigInt(
+            asBigIntInput(
+              (invalidationSnapshotCollateral as { fields?: { value?: unknown } })?.fields?.value ??
+                invalidationSnapshotCollateral,
+            ),
+          )
         : null,
-      marketTypePolicyId: String(fields.market_type_policy_id ?? ""),
-      resolverPolicyId: String(fields.resolver_policy_id ?? ""),
-      configVersion: Number(fields.config_version ?? 0),
-      resolution: null, // Populated separately via dynamic field fetch
-      emergencyPaused: Boolean(fields.emergency_paused),
+      marketTypePolicyId: String(readScalar("market_type_policy_id", "marketTypePolicyId") ?? ""),
+      resolverPolicyId: String(readScalar("resolver_policy_id", "resolverPolicyId") ?? ""),
+      configVersion: Number(readScalar("config_version", "configVersion") ?? 0),
+      resolution: resolution
+        ? {
+            resolvedOutcome: Number(
+              (resolution as { fields?: Record<string, unknown> })?.fields?.resolved_outcome ??
+                (resolution as Record<string, unknown>).resolved_outcome ??
+                0,
+            ),
+            resolutionClass: Number(
+              (resolution as { fields?: Record<string, unknown> })?.fields?.resolution_class ??
+                (resolution as Record<string, unknown>).resolution_class ??
+                0,
+            ) as ResolutionClass,
+            resolverAddress: String(
+              (resolution as { fields?: Record<string, unknown> })?.fields?.resolver_address ??
+                (resolution as Record<string, unknown>).resolver_address ??
+                "",
+            ),
+            evidenceHash: String(
+              (resolution as { fields?: Record<string, unknown> })?.fields?.evidence_hash ??
+                (resolution as Record<string, unknown>).evidence_hash ??
+                "",
+            ),
+            resolvedAtMs: Number(
+              (resolution as { fields?: Record<string, unknown> })?.fields?.resolved_at_ms ??
+                (resolution as Record<string, unknown>).resolved_at_ms ??
+                0,
+            ),
+            disputeWindowEndMs: Number(
+              (resolution as { fields?: Record<string, unknown> })?.fields?.dispute_window_end_ms ??
+                (resolution as Record<string, unknown>).dispute_window_end_ms ??
+                0,
+            ),
+            finalized: Boolean(
+              (resolution as { fields?: Record<string, unknown> })?.fields?.finalized ??
+                (resolution as Record<string, unknown>).finalized,
+            ),
+          }
+        : null,
+      emergencyPaused: Boolean(readScalar("emergency_paused", "emergencyPaused")),
     };
   } catch {
     return null;

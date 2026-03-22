@@ -14,21 +14,9 @@
  */
 
 import { Transaction } from "@mysten/sui/transactions";
-import {
-  PM_PACKAGE_ID,
-  PM_REGISTRY_ID,
-  PM_CONFIG_ID,
-} from "./market-constants";
 
 /** Sui shared clock object ID */
 const SUI_CLOCK_OBJECT_ID = "0x6";
-
-function requirePackageId(): string {
-  if (!PM_PACKAGE_ID || PM_PACKAGE_ID === "0x0") {
-    throw new Error("Set VITE_PM_PACKAGE_ID before building SDVM transactions.");
-  }
-  return PM_PACKAGE_ID;
-}
 
 /**
  * Convert Uint8Array to vector<u8> arguments for Move.
@@ -39,6 +27,22 @@ function requirePackageId(): string {
  */
 function bytesToU8Vec(bytes: Uint8Array): number[] {
   return Array.from(bytes);
+}
+
+function mergeCoinInputs(tx: Transaction, coinObjectIds: string[]) {
+  if (coinObjectIds.length === 0) {
+    throw new Error("No collateral coin objects were provided.");
+  }
+
+  const primary = tx.object(coinObjectIds[0]);
+  if (coinObjectIds.length > 1) {
+    tx.mergeCoins(
+      primary,
+      coinObjectIds.slice(1).map((coinObjectId) => tx.object(coinObjectId)),
+    );
+  }
+
+  return primary;
 }
 
 // ───────────────────────────────────────────────────────────────
@@ -52,9 +56,8 @@ function bytesToU8Vec(bytes: Uint8Array): number[] {
  * Returns: SufferStakePosition (owned object sent to sender)
  *
  * @param params.poolId - Shared object ID of SufferStakePool
- * @param params.coinObjectId - Coin<SUFFER> object ID to stake
- * @param params.amount - Amount in base units (9 decimals, so 1e9 = 1 SUFFER)
- * @param params.stakeEpoch - Current epoch (for cooldown calculation)
+ * @param params.paymentCoinIds - Coin object IDs available for staking
+ * @param params.amount - Amount in base units to stake
  * @param params.packageId - SDVM package ID
  * @returns Transaction ready to sign and submit
  *
@@ -69,19 +72,20 @@ function bytesToU8Vec(bytes: Uint8Array): number[] {
  */
 export function buildStakeTransaction(params: {
   poolId: string;
-  coinObjectId: string;
+  paymentCoinIds: string[];
   amount: bigint;
-  stakeEpoch: number;
   packageId: string;
 }): Transaction {
   const tx = new Transaction();
+  const merged = mergeCoinInputs(tx, params.paymentCoinIds);
+  const [stakeCoin] = tx.splitCoins(merged, [tx.pure.u64(params.amount)]);
 
   tx.moveCall({
     target: `${params.packageId}::pm_staking::stake`,
     arguments: [
       tx.object(params.poolId),
-      tx.object(params.coinObjectId),
-      tx.pure.u64(params.stakeEpoch),
+      stakeCoin,
+      tx.object(SUI_CLOCK_OBJECT_ID),
     ],
   });
 
@@ -109,7 +113,7 @@ export function buildInitiateUnstakeTransaction(params: {
 
   tx.moveCall({
     target: `${params.packageId}::pm_staking::initiate_unstake`,
-    arguments: [tx.object(params.stakePositionId)],
+    arguments: [tx.object(params.stakePositionId), tx.object(SUI_CLOCK_OBJECT_ID)],
   });
 
   return tx;
@@ -259,7 +263,7 @@ export function buildCommitVoteTransaction(params: {
  */
 export function buildExplicitAbstainTransaction(params: {
   roundId: string;
-  stakePoolId: string;
+  commitRecordId: string;
   stakePositionId: string;
   salt: Uint8Array;
   packageId: string;
@@ -274,7 +278,7 @@ export function buildExplicitAbstainTransaction(params: {
     target: `${params.packageId}::pm_sdvm::explicit_abstain`,
     arguments: [
       tx.object(params.roundId),
-      tx.object(params.stakePoolId),
+      tx.object(params.commitRecordId),
       tx.object(params.stakePositionId),
       tx.pure.vector("u8", bytesToU8Vec(params.salt)),
       tx.object(SUI_CLOCK_OBJECT_ID),
@@ -325,10 +329,10 @@ export function buildRevealVoteTransaction(params: {
     target: `${params.packageId}::pm_sdvm::reveal_vote`,
     arguments: [
       tx.object(params.roundId),
+      tx.object(params.commitRecordId),
       tx.object(params.stakePositionId),
       tx.pure.u16(params.votedOutcome),
       tx.pure.vector("u8", bytesToU8Vec(params.salt)),
-      tx.object(params.commitRecordId),
       tx.object(SUI_CLOCK_OBJECT_ID),
     ],
   });
@@ -456,7 +460,7 @@ export function buildClaimRewardTransaction(params: {
   const tx = new Transaction();
 
   tx.moveCall({
-    target: `${params.packageId}::pm_sdvm::claim_reward`,
+    target: `${params.packageId}::pm_sdvm::claim_voter_reward`,
     arguments: [
       tx.object(params.roundId),
       tx.object(params.stakePositionId),

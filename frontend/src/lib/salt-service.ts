@@ -23,7 +23,7 @@
  */
 
 import { buildCommitHash, generateSalt as generateRandomSalt } from "./vote-hash";
-import { sha256 } from "@noble/hashes/sha256";
+import { sha256 } from "@noble/hashes/sha2.js";
 
 /**
  * BIP39 word list (English, first 1024 words for mnemonic generation).
@@ -633,10 +633,6 @@ export class SaltService {
     return bytes;
   }
 
-  private bytesToHex(bytes: Uint8Array): string {
-    return "0x" + Array.from(bytes).map((b) => b.toString(16).padStart(2, "0")).join("");
-  }
-
   /**
    * SHA256 hash using @noble/hashes for cryptographic security.
    * Used for mnemonic seed derivation and deterministic salt generation.
@@ -653,7 +649,7 @@ export class SaltService {
   private sha256String(str: string): string {
     const data = new TextEncoder().encode(str);
     const hash = sha256(data);
-    return "0x" + Array.from(hash).map((b) => b.toString(16).padStart(2, "0")).join("");
+    return "0x" + Array.from(hash).map((b: number) => b.toString(16).padStart(2, "0")).join("");
   }
 }
 
