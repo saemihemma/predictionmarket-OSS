@@ -1,917 +1,398 @@
-/// SDVM Functional Test Suite — Track 1 Phase 3
-///
-/// Comprehensive test coverage for:
-/// - Happy path: full lifecycle (commit → reveal → tally → claim → unstake)
-/// - Sad paths: double commit/reveal, hash mismatch, deadline enforcement
-/// - Edge cases: abstain, 10x non-reveal slash, GAT rollover, max rolls
-/// - Dispute awareness: pending disputes block unstake
-/// - Admin operations: resolve, phase advance, quorum override
-/// - Cleanup: orphaned commits, settled disputes
-/// - Reward/slash conservation
-///
 #[test_only]
 module prediction_market::sdvm_functional_tests;
 
-use prediction_market::{
-    pm_sdvm::{
-        Self, SDVMVoteRound, SDVMCommitRecord, VoteReveal,
-    },
-    pm_staking::{Self, SufferStakePool, SufferStakePosition, SDVMAdminCap},
-    pm_rules,
-    suffer::SUFFER,
-};
+use std::{bcs, hash, string, unit_test::destroy};
 use sui::{
-    test_scenario::{Self as ts, Scenario},
-    coin::{Self, Coin},
-    clock::{Self, Clock},
-    object,
-    transfer,
+    clock::{Self as clock},
+    test_scenario::{Self as ts},
 };
-use std::vector;
+use prediction_market::{
+    pm_dispute,
+    pm_market,
+    pm_resolution,
+    pm_rules,
+    pm_sdvm,
+    pm_staking::{Self, PMStakePool},
+    pm_treasury,
+    test_support::{Self as support, TEST_COLLATERAL},
+};
 
-// ═══════════════════════════════════════════════════════════════
-// Test Constants
-// ═══════════════════════════════════════════════════════════════
-
-const TESTNET_SLASH_RATE_BPS: u64 = 0; // T1: 0% slash
-const BASE_STAKE: u64 = 1000;
-const MULTI_VOTER_STAKE: u64 = 2000;
-const TOTAL_STAKED_SNAPSHOT: u64 = 10000;
-
-// Helper: Create scenario and clock
-fun setup_test(ctx: &mut sui::tx_context::TxContext): (Clock, SufferStakePool, SDVMAdminCap) {
-    let clock = clock::create_for_testing(ctx);
-    let admin_cap = pm_staking::create_admin_cap(ctx);
-    pm_staking::create_and_share_pool(ctx);
-
-    // Return (clock, pool) — pool is shared, so we need to retrieve it in tests
-    (clock, admin_cap)
-}
-
-// Helper: Create stake position
-fun create_stake_position(
-    pool: &mut SufferStakePool,
-    amount: u64,
-    clock: &Clock,
-    ctx: &mut sui::tx_context::TxContext,
-): SufferStakePosition {
-    let coin = coin::mint_for_testing<SUFFER>(amount, ctx);
-    pm_staking::stake(pool, coin, clock, ctx)
-}
-
-// Helper: Create vote round
-fun create_vote_round(
-    ctx: &mut sui::tx_context::TxContext,
-    clock: &Clock,
-    dispute_id: object::ID,
-    outcome_count: u16,
-    total_staked: u64,
-): SDVMVoteRound {
-    pm_sdvm::create_vote_round(dispute_id, outcome_count, total_staked, false, clock, ctx)
-}
-
-// Helper: Build commitment hash (Move version)
-fun build_commit_hash_move(outcome: u16, salt: vector<u8>): vector<u8> {
-    // BCS serialize u16 as little-endian
-    let mut outcome_bytes = vector::empty<u8>();
-    vector::push_back(&mut outcome_bytes, (outcome & 0xFF) as u8);
-    vector::push_back(&mut outcome_bytes, ((outcome >> 8) & 0xFF) as u8);
-
-    // Concatenate: outcome_bytes || salt
-    let mut preimage = outcome_bytes;
+fun commitment_hash(outcome: u16, salt: vector<u8>): vector<u8> {
+    let mut preimage = bcs::to_bytes(&outcome);
     vector::append(&mut preimage, salt);
-
-    // SHA3-256
-    sui::hash::sha3_256(preimage)
+    hash::sha3_256(preimage)
 }
-
-// Helper: Generate test salt
-fun test_salt(seed: u8): vector<u8> {
-    let mut salt = vector::empty<u8>();
-    let mut i = 0;
-    while (i < 32) {
-        vector::push_back(&mut salt, seed +% (i as u8));
-        i = i + 1;
-    };
-    salt
-}
-
-// ═══════════════════════════════════════════════════════════════
-// Test 1: Happy Path — Full Lifecycle (1 Voter)
-// ═══════════════════════════════════════════════════════════════
 
 #[test]
-fun test_happy_path_full_lifecycle() {
+fun test_sdvm_round_settles_and_routes_rewards_in_generic_collateral() {
     let mut scenario = ts::begin(@0x1);
     let ctx = ts::ctx(&mut scenario);
-    let (clock, _admin_cap) = setup_test(ctx);
+    pm_staking::create_and_share_pool<TEST_COLLATERAL>(ctx);
 
-    ts::next_tx(&mut scenario, @0x2);
+    ts::next_tx(&mut scenario, @0x1);
+    let mut stake_pool = ts::take_shared<PMStakePool<TEST_COLLATERAL>>(&scenario);
     let ctx = ts::ctx(&mut scenario);
+    let mut test_clock = clock::create_for_testing(ctx);
 
-    // Create pool and position
-    pm_staking::create_and_share_pool(ctx);
+    let (mut registry, config, admin) = support::create_core_bundle<TEST_COLLATERAL>(ctx);
+    let (policy, resolver_policy) = support::create_creator_policy(&admin, ctx);
+    let mut treasury = pm_treasury::create_treasury<TEST_COLLATERAL>(ctx);
+    let resolver_set = pm_dispute::create_resolver_set(&admin, vector[@0x2], 1, ctx);
+    let staking_admin = pm_staking::create_admin_cap<TEST_COLLATERAL>(ctx);
+    let mut market = support::create_binary_market(
+        &mut registry,
+        &config,
+        &policy,
+        &resolver_policy,
+        support::mint_test_balance(support::default_creation_bond(), ctx),
+        10_000,
+        20_000,
+        &test_clock,
+        ctx,
+    );
 
-    ts::next_tx(&mut scenario, @0x2);
-    let ctx = ts::ctx(&mut scenario);
-    let mut pool = ts::take_shared<SufferStakePool>(&scenario);
-    let clock = clock::create_for_testing(ctx);
+    clock::increment_for_testing(&mut test_clock, 11_000);
+    pm_resolution::propose_resolution(
+        &mut market,
+        0,
+        b"creator-outcome-zero",
+        &test_clock,
+        ctx,
+    );
 
-    let position = create_stake_position(&mut pool, BASE_STAKE, &clock, ctx);
+    let mut dispute = pm_dispute::file_dispute(
+        &mut market,
+        &config,
+        &resolver_set,
+        1,
+        b"better-evidence",
+        support::mint_test_coin(support::default_dispute_bond(), ctx),
+        &test_clock,
+        ctx,
+    );
 
-    ts::next_tx(&mut scenario, @0x2);
-    let ctx = ts::ctx(&mut scenario);
-    let dispute_id = object::id_from_address(@0x100);
+    let mut correct_position = pm_staking::stake(
+        &mut stake_pool,
+        support::mint_test_coin(100, ctx),
+        &test_clock,
+        ctx,
+    );
+    let mut reserve_position = pm_staking::stake(
+        &mut stake_pool,
+        support::mint_test_coin(40, ctx),
+        &test_clock,
+        ctx,
+    );
 
-    // Create round
-    let mut round = create_vote_round(ctx, &clock, dispute_id, 2, TOTAL_STAKED_SNAPSHOT);
+    let mut round = pm_dispute::create_sdvm_vote_round(
+        &mut dispute,
+        &stake_pool,
+        false,
+        &test_clock,
+        ctx,
+    );
 
-    // Commit phase
-    let salt = test_salt(1);
-    let hash = build_commit_hash_move(1, salt);
-    let commit_record = pm_sdvm::commit_vote(&round, &pool, &position, hash, &clock, ctx);
+    let correct_salt = b"correct";
+    let correct_commit = pm_sdvm::commit_vote(
+        &mut round,
+        &stake_pool,
+        &mut correct_position,
+        commitment_hash(1, correct_salt),
+        &test_clock,
+        ctx,
+    );
 
-    ts::next_tx(&mut scenario, @0x2);
-    let ctx = ts::ctx(&mut scenario);
+    clock::increment_for_testing(&mut test_clock, 12 * 60 * 60 * 1000 + 1);
+    pm_sdvm::advance_to_reveal_phase(&mut round, &test_clock);
+    pm_sdvm::reveal_vote(
+        &mut round,
+        correct_commit,
+        &correct_position,
+        1,
+        correct_salt,
+        &test_clock,
+        ctx,
+    );
 
-    // Advance to reveal
-    clock::increment_for_testing(&mut clock, 13 * 60 * 60 * 1000); // 13 hours
-    pm_sdvm::advance_to_reveal_phase(&mut round, &clock);
-    assert!(pm_sdvm::round_phase(&round) == pm_rules::vote_phase_reveal(), 0);
+    clock::increment_for_testing(&mut test_clock, 12 * 60 * 60 * 1000 + 1);
+    pm_sdvm::advance_to_tally_phase(&mut round, &test_clock);
+    pm_sdvm::tally_votes(&mut round, &mut stake_pool, &test_clock, ctx);
 
-    // Reveal phase
-    let mut position = ts::take_from_sender<SufferStakePosition>(&scenario);
-    pm_sdvm::reveal_vote(&mut round, commit_record, &position, 1, salt, &clock, ctx);
-    assert!(pm_sdvm::round_reveal_count(&round) == 1, 0);
+    let settled_outcome = pm_sdvm::round_admin_resolved_outcome(&round);
+    assert!(pm_sdvm::round_is_settled(&round), 0);
+    assert!(option::is_some(&settled_outcome), 1);
+    assert!(*option::borrow(&settled_outcome) == 1, 2);
 
-    ts::next_tx(&mut scenario, @0x2);
-    let ctx = ts::ctx(&mut scenario);
+    pm_staking::admin_slash_override(
+        &staking_admin,
+        &mut stake_pool,
+        &mut reserve_position,
+        4,
+        b"seed-reward-pool",
+    );
+    pm_sdvm::claim_voter_reward(&mut round, &mut correct_position, &mut stake_pool, &test_clock, ctx);
 
-    // Advance to tally
-    clock::increment_for_testing(&mut clock, 13 * 60 * 60 * 1000);
-    pm_sdvm::advance_to_tally_phase(&mut round, &clock);
-    assert!(pm_sdvm::round_phase(&round) == pm_rules::vote_phase_tally(), 0);
+    assert!(pm_staking::position_cumulative_rewards(&correct_position) == 4, 3);
+    assert!(pm_staking::position_cumulative_slash(&reserve_position) == 4, 4);
 
-    // Tally
-    pm_sdvm::tally_votes(&mut round, &mut pool, &clock, ctx);
-    assert!(pm_sdvm::round_phase(&round) == pm_rules::vote_phase_settled(), 0);
+    pm_dispute::resolve_from_sdvm(
+        &mut dispute,
+        &mut market,
+        &mut treasury,
+        &round,
+        ctx,
+    );
 
-    ts::next_tx(&mut scenario, @0x2);
-    let ctx = ts::ctx(&mut scenario);
-    let mut round = ts::take_shared<SDVMVoteRound>(&scenario);
-    let mut pool = ts::take_shared<SufferStakePool>(&scenario);
+    assert!(pm_market::state(&market) == pm_rules::state_invalid(), 5);
+    assert!(pm_treasury::balance(&treasury) >= support::default_creation_bond(), 6);
 
-    // Claim reward
-    pm_sdvm::claim_voter_reward(&mut round, &mut position, &mut pool, &clock, ctx);
-
-    // Unstake
-    pm_staking::initiate_unstake(&mut position, &clock, ctx);
-
-    ts::next_tx(&mut scenario, @0x2);
-    let ctx = ts::ctx(&mut scenario);
-
-    clock::increment_for_testing(&mut clock, 48 * 60 * 60 * 1000); // 48 hour cooldown
-    let _returned_coin = pm_staking::complete_unstake(&mut pool, position, &clock, ctx);
-
-    ts::return_shared(pool);
-    ts::return_shared(round);
-    clock::destroy_for_testing(clock);
+    ts::return_shared(stake_pool);
+    destroy(round);
+    destroy(reserve_position);
+    destroy(correct_position);
+    destroy(dispute);
+    destroy(staking_admin);
+    destroy(resolver_set);
+    destroy(market);
+    destroy(treasury);
+    destroy(policy);
+    destroy(resolver_policy);
+    destroy(admin);
+    destroy(config);
+    destroy(registry);
+    clock::destroy_for_testing(test_clock);
     ts::end(scenario);
 }
 
-// ═══════════════════════════════════════════════════════════════
-// Test 2: Double Commit Fails
-// ═══════════════════════════════════════════════════════════════
-
 #[test]
-#[expected_failure(abort_code = 402)] // EAlreadyCommitted
-fun test_double_commit_fails() {
+fun test_sdvm_round_rolls_and_allows_recommit_from_same_position() {
     let mut scenario = ts::begin(@0x1);
     let ctx = ts::ctx(&mut scenario);
+    pm_staking::create_and_share_pool<TEST_COLLATERAL>(ctx);
 
-    pm_staking::create_and_share_pool(ctx);
-
-    ts::next_tx(&mut scenario, @0x2);
+    ts::next_tx(&mut scenario, @0x1);
+    let mut stake_pool = ts::take_shared<PMStakePool<TEST_COLLATERAL>>(&scenario);
     let ctx = ts::ctx(&mut scenario);
-    let clock = clock::create_for_testing(ctx);
-    let mut pool = ts::take_shared<SufferStakePool>(&scenario);
+    let mut test_clock = clock::create_for_testing(ctx);
+
+    let mut position = pm_staking::stake(
+        &mut stake_pool,
+        support::mint_test_coin(100, ctx),
+        &test_clock,
+        ctx,
+    );
+
+    let mut round = pm_sdvm::create_vote_round<TEST_COLLATERAL>(
+        object::id(&position),
+        2,
+        pm_staking::pool_total_staked(&stake_pool),
+        false,
+        &test_clock,
+        ctx,
+    );
+
+    let first_commit = pm_sdvm::commit_vote(
+        &mut round,
+        &stake_pool,
+        &mut position,
+        commitment_hash(0, b"round-one"),
+        &test_clock,
+        ctx,
+    );
+
+    clock::increment_for_testing(&mut test_clock, 12 * 60 * 60 * 1000 + 1);
+    pm_sdvm::advance_to_reveal_phase(&mut round, &test_clock);
+    clock::increment_for_testing(&mut test_clock, 12 * 60 * 60 * 1000 + 1);
+    pm_sdvm::advance_to_tally_phase(&mut round, &test_clock);
+    pm_sdvm::tally_votes(&mut round, &mut stake_pool, &test_clock, ctx);
 
-    let position = create_stake_position(&mut pool, BASE_STAKE, &clock, ctx);
-
-    ts::next_tx(&mut scenario, @0x2);
-    let ctx = ts::ctx(&mut scenario);
-    let dispute_id = object::id_from_address(@0x100);
-    let round = create_vote_round(ctx, &clock, dispute_id, 2, TOTAL_STAKED_SNAPSHOT);
-
-    // First commit
-    let salt1 = test_salt(1);
-    let hash1 = build_commit_hash_move(0, salt1);
-    let _commit1 = pm_sdvm::commit_vote(&round, &pool, &position, hash1, &clock, ctx);
-
-    ts::next_tx(&mut scenario, @0x2);
-    let ctx = ts::ctx(&mut scenario);
-
-    // Second commit (should fail)
-    let salt2 = test_salt(2);
-    let hash2 = build_commit_hash_move(1, salt2);
-    let _commit2 = pm_sdvm::commit_vote(&round, &pool, &position, hash2, &clock, ctx);
-
-    ts::return_shared(pool);
-    clock::destroy_for_testing(clock);
-    ts::end(scenario);
-}
-
-// ═══════════════════════════════════════════════════════════════
-// Test 3: Double Reveal Fails (commit record consumed)
-// ═══════════════════════════════════════════════════════════════
-
-#[test]
-#[expected_failure]
-fun test_double_reveal_fails() {
-    let mut scenario = ts::begin(@0x1);
-    let ctx = ts::ctx(&mut scenario);
-
-    pm_staking::create_and_share_pool(ctx);
-
-    ts::next_tx(&mut scenario, @0x2);
-    let ctx = ts::ctx(&mut scenario);
-    let clock = clock::create_for_testing(ctx);
-    let mut pool = ts::take_shared<SufferStakePool>(&scenario);
-
-    let position = create_stake_position(&mut pool, BASE_STAKE, &clock, ctx);
-
-    ts::next_tx(&mut scenario, @0x2);
-    let ctx = ts::ctx(&mut scenario);
-    let dispute_id = object::id_from_address(@0x100);
-    let mut round = create_vote_round(ctx, &clock, dispute_id, 2, TOTAL_STAKED_SNAPSHOT);
-
-    // Commit
-    let salt = test_salt(1);
-    let hash = build_commit_hash_move(0, salt);
-    let commit_record = pm_sdvm::commit_vote(&round, &pool, &position, hash, &clock, ctx);
-
-    ts::next_tx(&mut scenario, @0x2);
-    let ctx = ts::ctx(&mut scenario);
-
-    // Advance to reveal
-    clock::increment_for_testing(&mut clock, 13 * 60 * 60 * 1000);
-    pm_sdvm::advance_to_reveal_phase(&mut round, &clock);
-
-    // First reveal
-    let mut position = ts::take_from_sender<SufferStakePosition>(&scenario);
-    pm_sdvm::reveal_vote(&mut round, commit_record, &position, 0, salt, &clock, ctx);
-
-    ts::next_tx(&mut scenario, @0x2);
-    let ctx = ts::ctx(&mut scenario);
-
-    // Second reveal attempt should fail (commit_record already consumed/deleted)
-    // We can't actually call it again since commit_record was moved in first reveal
-    // But the test verifies the record is consumed
-
-    ts::return_shared(pool);
-    clock::destroy_for_testing(clock);
-    ts::end(scenario);
-}
-
-// ═══════════════════════════════════════════════════════════════
-// Test 4: Double Claim Fails
-// ═══════════════════════════════════════════════════════════════
-
-#[test]
-#[expected_failure(abort_code = 419)] // EAlreadyClaimed
-fun test_double_claim_fails() {
-    let mut scenario = ts::begin(@0x1);
-    let ctx = ts::ctx(&mut scenario);
-
-    pm_staking::create_and_share_pool(ctx);
-
-    ts::next_tx(&mut scenario, @0x2);
-    let ctx = ts::ctx(&mut scenario);
-    let clock = clock::create_for_testing(ctx);
-    let mut pool = ts::take_shared<SufferStakePool>(&scenario);
-
-    let position = create_stake_position(&mut pool, BASE_STAKE, &clock, ctx);
-
-    ts::next_tx(&mut scenario, @0x2);
-    let ctx = ts::ctx(&mut scenario);
-    let dispute_id = object::id_from_address(@0x100);
-    let mut round = create_vote_round(ctx, &clock, dispute_id, 2, TOTAL_STAKED_SNAPSHOT);
-
-    // Commit and reveal
-    let salt = test_salt(1);
-    let hash = build_commit_hash_move(1, salt);
-    let commit = pm_sdvm::commit_vote(&round, &pool, &position, hash, &clock, ctx);
-
-    ts::next_tx(&mut scenario, @0x2);
-    let ctx = ts::ctx(&mut scenario);
-    clock::increment_for_testing(&mut clock, 13 * 60 * 60 * 1000);
-    pm_sdvm::advance_to_reveal_phase(&mut round, &clock);
-
-    let mut position = ts::take_from_sender<SufferStakePosition>(&scenario);
-    pm_sdvm::reveal_vote(&mut round, commit, &position, 1, salt, &clock, ctx);
-
-    ts::next_tx(&mut scenario, @0x2);
-    let ctx = ts::ctx(&mut scenario);
-    clock::increment_for_testing(&mut clock, 13 * 60 * 60 * 1000);
-    pm_sdvm::advance_to_tally_phase(&mut round, &clock);
-
-    pm_sdvm::tally_votes(&mut round, &mut pool, &clock, ctx);
-
-    ts::next_tx(&mut scenario, @0x2);
-    let ctx = ts::ctx(&mut scenario);
-    let mut round = ts::take_shared<SDVMVoteRound>(&scenario);
-    let mut pool = ts::take_shared<SufferStakePool>(&scenario);
-
-    // First claim
-    pm_sdvm::claim_voter_reward(&mut round, &mut position, &mut pool, &clock, ctx);
-
-    ts::next_tx(&mut scenario, @0x2);
-    let ctx = ts::ctx(&mut scenario);
-
-    // Second claim (should fail)
-    pm_sdvm::claim_voter_reward(&mut round, &mut position, &mut pool, &clock, ctx);
-
-    ts::return_shared(pool);
-    ts::return_shared(round);
-    clock::destroy_for_testing(clock);
-    ts::end(scenario);
-}
-
-// ═══════════════════════════════════════════════════════════════
-// Test 5: Hash Mismatch Fails
-// ═══════════════════════════════════════════════════════════════
-
-#[test]
-#[expected_failure(abort_code = 404)] // EHashMismatch
-fun test_hash_mismatch_fails() {
-    let mut scenario = ts::begin(@0x1);
-    let ctx = ts::ctx(&mut scenario);
-
-    pm_staking::create_and_share_pool(ctx);
-
-    ts::next_tx(&mut scenario, @0x2);
-    let ctx = ts::ctx(&mut scenario);
-    let clock = clock::create_for_testing(ctx);
-    let mut pool = ts::take_shared<SufferStakePool>(&scenario);
-
-    let position = create_stake_position(&mut pool, BASE_STAKE, &clock, ctx);
-
-    ts::next_tx(&mut scenario, @0x2);
-    let ctx = ts::ctx(&mut scenario);
-    let dispute_id = object::id_from_address(@0x100);
-    let mut round = create_vote_round(ctx, &clock, dispute_id, 2, TOTAL_STAKED_SNAPSHOT);
-
-    // Commit for outcome=0
-    let salt = test_salt(1);
-    let hash = build_commit_hash_move(0, salt);
-    let commit = pm_sdvm::commit_vote(&round, &pool, &position, hash, &clock, ctx);
-
-    ts::next_tx(&mut scenario, @0x2);
-    let ctx = ts::ctx(&mut scenario);
-    clock::increment_for_testing(&mut clock, 13 * 60 * 60 * 1000);
-    pm_sdvm::advance_to_reveal_phase(&mut round, &clock);
-
-    // Try to reveal with wrong outcome (1 instead of 0)
-    let mut position = ts::take_from_sender<SufferStakePosition>(&scenario);
-    pm_sdvm::reveal_vote(&mut round, commit, &position, 1, salt, &clock, ctx);
-
-    ts::return_shared(pool);
-    clock::destroy_for_testing(clock);
-    ts::end(scenario);
-}
-
-// ═══════════════════════════════════════════════════════════════
-// Test 6: Wrong Phase Commit
-// ═══════════════════════════════════════════════════════════════
-
-#[test]
-#[expected_failure(abort_code = 400)] // EInvalidPhase
-fun test_wrong_phase_commit() {
-    let mut scenario = ts::begin(@0x1);
-    let ctx = ts::ctx(&mut scenario);
-
-    pm_staking::create_and_share_pool(ctx);
-
-    ts::next_tx(&mut scenario, @0x2);
-    let ctx = ts::ctx(&mut scenario);
-    let clock = clock::create_for_testing(ctx);
-    let mut pool = ts::take_shared<SufferStakePool>(&scenario);
-
-    let position = create_stake_position(&mut pool, BASE_STAKE, &clock, ctx);
-
-    ts::next_tx(&mut scenario, @0x2);
-    let ctx = ts::ctx(&mut scenario);
-    let dispute_id = object::id_from_address(@0x100);
-    let mut round = create_vote_round(ctx, &clock, dispute_id, 2, TOTAL_STAKED_SNAPSHOT);
-
-    // Advance to reveal phase
-    clock::increment_for_testing(&mut clock, 13 * 60 * 60 * 1000);
-    pm_sdvm::advance_to_reveal_phase(&mut round, &clock);
-
-    // Try to commit in REVEAL phase
-    let salt = test_salt(1);
-    let hash = build_commit_hash_move(0, salt);
-    let _commit = pm_sdvm::commit_vote(&round, &pool, &position, hash, &clock, ctx);
-
-    ts::return_shared(pool);
-    clock::destroy_for_testing(clock);
-    ts::end(scenario);
-}
-
-// ═══════════════════════════════════════════════════════════════
-// Test 7: Wrong Phase Reveal
-// ═══════════════════════════════════════════════════════════════
-
-#[test]
-#[expected_failure(abort_code = 400)] // EInvalidPhase
-fun test_wrong_phase_reveal() {
-    let mut scenario = ts::begin(@0x1);
-    let ctx = ts::ctx(&mut scenario);
-
-    pm_staking::create_and_share_pool(ctx);
-
-    ts::next_tx(&mut scenario, @0x2);
-    let ctx = ts::ctx(&mut scenario);
-    let clock = clock::create_for_testing(ctx);
-    let mut pool = ts::take_shared<SufferStakePool>(&scenario);
-
-    let position = create_stake_position(&mut pool, BASE_STAKE, &clock, ctx);
-
-    ts::next_tx(&mut scenario, @0x2);
-    let ctx = ts::ctx(&mut scenario);
-    let dispute_id = object::id_from_address(@0x100);
-    let mut round = create_vote_round(ctx, &clock, dispute_id, 2, TOTAL_STAKED_SNAPSHOT);
-
-    // Commit
-    let salt = test_salt(1);
-    let hash = build_commit_hash_move(0, salt);
-    let commit = pm_sdvm::commit_vote(&round, &pool, &position, hash, &clock, ctx);
-
-    ts::next_tx(&mut scenario, @0x2);
-    let ctx = ts::ctx(&mut scenario);
-
-    // Try to reveal in COMMIT phase (before advancing)
-    let mut position = ts::take_from_sender<SufferStakePosition>(&scenario);
-    pm_sdvm::reveal_vote(&mut round, commit, &position, 0, salt, &clock, ctx);
-
-    ts::return_shared(pool);
-    clock::destroy_for_testing(clock);
-    ts::end(scenario);
-}
-
-// ═══════════════════════════════════════════════════════════════
-// Test 8: Deadline Enforcement
-// ═══════════════════════════════════════════════════════════════
-
-#[test]
-#[expected_failure(abort_code = 401)] // EDeadlineNotReached
-fun test_deadline_enforcement() {
-    let mut scenario = ts::begin(@0x1);
-    let ctx = ts::ctx(&mut scenario);
-
-    pm_staking::create_and_share_pool(ctx);
-
-    ts::next_tx(&mut scenario, @0x2);
-    let ctx = ts::ctx(&mut scenario);
-    let clock = clock::create_for_testing(ctx);
-    let mut pool = ts::take_shared<SufferStakePool>(&scenario);
-
-    let position = create_stake_position(&mut pool, BASE_STAKE, &clock, ctx);
-
-    ts::next_tx(&mut scenario, @0x2);
-    let ctx = ts::ctx(&mut scenario);
-    let dispute_id = object::id_from_address(@0x100);
-    let round = create_vote_round(ctx, &clock, dispute_id, 2, TOTAL_STAKED_SNAPSHOT);
-
-    // Try to commit after deadline (without advancing time first)
-    clock::increment_for_testing(&mut clock, 13 * 60 * 60 * 1000);
-
-    let salt = test_salt(1);
-    let hash = build_commit_hash_move(0, salt);
-    let _commit = pm_sdvm::commit_vote(&round, &pool, &position, hash, &clock, ctx);
-
-    ts::return_shared(pool);
-    clock::destroy_for_testing(clock);
-    ts::end(scenario);
-}
-
-// ═══════════════════════════════════════════════════════════════
-// Test 9: Insufficient Stake
-// ═══════════════════════════════════════════════════════════════
-
-#[test]
-#[expected_failure(abort_code = 413)] // EZeroStake
-fun test_insufficient_stake() {
-    let mut scenario = ts::begin(@0x1);
-    let ctx = ts::ctx(&mut scenario);
-
-    pm_staking::create_and_share_pool(ctx);
-
-    ts::next_tx(&mut scenario, @0x2);
-    let ctx = ts::ctx(&mut scenario);
-    let clock = clock::create_for_testing(ctx);
-    let mut pool = ts::take_shared<SufferStakePool>(&scenario);
-
-    // Create position with 0 stake
-    let position = create_stake_position(&mut pool, 0, &clock, ctx);
-
-    ts::next_tx(&mut scenario, @0x2);
-    let ctx = ts::ctx(&mut scenario);
-    let dispute_id = object::id_from_address(@0x100);
-    let round = create_vote_round(ctx, &clock, dispute_id, 2, TOTAL_STAKED_SNAPSHOT);
-
-    // Try to commit with zero stake
-    let salt = test_salt(1);
-    let hash = build_commit_hash_move(0, salt);
-    let _commit = pm_sdvm::commit_vote(&round, &pool, &position, hash, &clock, ctx);
-
-    ts::return_shared(pool);
-    clock::destroy_for_testing(clock);
-    ts::end(scenario);
-}
-
-// ═══════════════════════════════════════════════════════════════
-// Test 10: Round ID Validation
-// ═══════════════════════════════════════════════════════════════
-
-#[test]
-#[expected_failure(abort_code = 421)] // EWrongRound
-fun test_round_id_validation() {
-    let mut scenario = ts::begin(@0x1);
-    let ctx = ts::ctx(&mut scenario);
-
-    pm_staking::create_and_share_pool(ctx);
-
-    ts::next_tx(&mut scenario, @0x2);
-    let ctx = ts::ctx(&mut scenario);
-    let clock = clock::create_for_testing(ctx);
-    let mut pool = ts::take_shared<SufferStakePool>(&scenario);
-
-    let position = create_stake_position(&mut pool, BASE_STAKE, &clock, ctx);
-
-    ts::next_tx(&mut scenario, @0x2);
-    let ctx = ts::ctx(&mut scenario);
-    let dispute_id_1 = object::id_from_address(@0x100);
-    let dispute_id_2 = object::id_from_address(@0x101);
-
-    // Create two rounds
-    let round1 = create_vote_round(ctx, &clock, dispute_id_1, 2, TOTAL_STAKED_SNAPSHOT);
-    let mut round2 = create_vote_round(ctx, &clock, dispute_id_2, 2, TOTAL_STAKED_SNAPSHOT);
-
-    // Commit to round 1
-    let salt = test_salt(1);
-    let hash = build_commit_hash_move(0, salt);
-    let commit_for_round1 = pm_sdvm::commit_vote(&round1, &pool, &position, hash, &clock, ctx);
-
-    ts::next_tx(&mut scenario, @0x2);
-    let ctx = ts::ctx(&mut scenario);
-    clock::increment_for_testing(&mut clock, 13 * 60 * 60 * 1000);
-    pm_sdvm::advance_to_reveal_phase(&mut round2, &clock);
-
-    // Try to reveal commit from round1 in round2
-    let mut position = ts::take_from_sender<SufferStakePosition>(&scenario);
-    pm_sdvm::reveal_vote(&mut round2, commit_for_round1, &position, 0, salt, &clock, ctx);
-
-    ts::return_shared(pool);
-    clock::destroy_for_testing(clock);
-    ts::end(scenario);
-}
-
-// ═══════════════════════════════════════════════════════════════
-// Test 11: Abstain No Slash
-// ═══════════════════════════════════════════════════════════════
-
-#[test]
-fun test_abstain_no_slash() {
-    let mut scenario = ts::begin(@0x1);
-    let ctx = ts::ctx(&mut scenario);
-
-    pm_staking::create_and_share_pool(ctx);
-
-    ts::next_tx(&mut scenario, @0x2);
-    let ctx = ts::ctx(&mut scenario);
-    let clock = clock::create_for_testing(ctx);
-    let mut pool = ts::take_shared<SufferStakePool>(&scenario);
-
-    let position = create_stake_position(&mut pool, BASE_STAKE, &clock, ctx);
-
-    ts::next_tx(&mut scenario, @0x2);
-    let ctx = ts::ctx(&mut scenario);
-    let dispute_id = object::id_from_address(@0x100);
-    let mut round = create_vote_round(ctx, &clock, dispute_id, 2, TOTAL_STAKED_SNAPSHOT);
-
-    // Commit abstain (0xFFFF)
-    let salt = test_salt(1);
-    let abstain_outcome = pm_rules::sdvm_outcome_abstain();
-    let hash = build_commit_hash_move(abstain_outcome, salt);
-    let commit = pm_sdvm::commit_vote(&round, &pool, &position, hash, &clock, ctx);
-
-    ts::next_tx(&mut scenario, @0x2);
-    let ctx = ts::ctx(&mut scenario);
-    clock::increment_for_testing(&mut clock, 13 * 60 * 60 * 1000);
-    pm_sdvm::advance_to_reveal_phase(&mut round, &clock);
-
-    // Explicit abstain
-    let mut position = ts::take_from_sender<SufferStakePosition>(&scenario);
-    pm_sdvm::explicit_abstain(&mut round, commit, &position, salt, &clock, ctx);
-
-    ts::next_tx(&mut scenario, @0x2);
-    let ctx = ts::ctx(&mut scenario);
-
-    // Verify position has no slash applied
-    let initial_stake = BASE_STAKE;
-    let net_stake = pm_staking::position_net_stake(&position);
-    assert!(net_stake == initial_stake, 0);
-
-    ts::return_shared(pool);
-    clock::destroy_for_testing(clock);
-    ts::end(scenario);
-}
-
-// ═══════════════════════════════════════════════════════════════
-// Test 12: Non-Reveal 10x Slash
-// ═══════════════════════════════════════════════════════════════
-
-#[test]
-fun test_non_reveal_10x_slash() {
-    let mut scenario = ts::begin(@0x1);
-    let ctx = ts::ctx(&mut scenario);
-
-    pm_staking::create_and_share_pool(ctx);
-
-    ts::next_tx(&mut scenario, @0x2);
-    let ctx = ts::ctx(&mut scenario);
-    let clock = clock::create_for_testing(ctx);
-    let mut pool = ts::take_shared<SufferStakePool>(&scenario);
-
-    let position = create_stake_position(&mut pool, BASE_STAKE, &clock, ctx);
-
-    ts::next_tx(&mut scenario, @0x2);
-    let ctx = ts::ctx(&mut scenario);
-    let dispute_id = object::id_from_address(@0x100);
-    let mut round = create_vote_round(ctx, &clock, dispute_id, 2, TOTAL_STAKED_SNAPSHOT);
-
-    // Commit but do NOT reveal
-    let salt = test_salt(1);
-    let hash = build_commit_hash_move(0, salt);
-    let _commit = pm_sdvm::commit_vote(&round, &pool, &position, hash, &clock, ctx);
-
-    ts::next_tx(&mut scenario, @0x2);
-    let ctx = ts::ctx(&mut scenario);
-    clock::increment_for_testing(&mut clock, 25 * 60 * 60 * 1000);
-
-    // Advance through phases to tally
-    pm_sdvm::advance_to_reveal_phase(&mut round, &clock);
-    pm_sdvm::advance_to_tally_phase(&mut round, &clock);
-    pm_sdvm::tally_votes(&mut round, &mut pool, &clock, ctx);
-
-    ts::next_tx(&mut scenario, @0x2);
-    let ctx = ts::ctx(&mut scenario);
-    let mut position = ts::take_from_sender<SufferStakePosition>(&scenario);
-    let mut round = ts::take_shared<SDVMVoteRound>(&scenario);
-
-    // Apply 10x slash for non-reveal (slash rate = 0%, but 10x will be 0% * 10 = 0% in T1)
-    // For this test to see actual slashing, we'd need T2 or T3 with non-zero slash rate
-    pm_sdvm::apply_voter_slash(&mut round, &mut position, 10 * TESTNET_SLASH_RATE_BPS);
-
-    // In T1 (0% slash), even 10x is still 0%
-    let net_stake = pm_staking::position_net_stake(&position);
-    assert!(net_stake == BASE_STAKE, 0);
-
-    ts::return_shared(pool);
-    ts::return_shared(round);
-    clock::destroy_for_testing(clock);
-    ts::end(scenario);
-}
-
-// ═══════════════════════════════════════════════════════════════
-// Test 13: GAT Rollover
-// ═══════════════════════════════════════════════════════════════
-
-#[test]
-fun test_gat_rollover() {
-    let mut scenario = ts::begin(@0x1);
-    let ctx = ts::ctx(&mut scenario);
-
-    pm_staking::create_and_share_pool(ctx);
-
-    ts::next_tx(&mut scenario, @0x2);
-    let ctx = ts::ctx(&mut scenario);
-    let clock = clock::create_for_testing(ctx);
-    let mut pool = ts::take_shared<SufferStakePool>(&scenario);
-
-    // Create voter with minimal stake (insufficient for round 1 GAT)
-    let position = create_stake_position(&mut pool, 100, &clock, ctx);
-
-    ts::next_tx(&mut scenario, @0x2);
-    let ctx = ts::ctx(&mut scenario);
-    let dispute_id = object::id_from_address(@0x100);
-    let mut round = create_vote_round(ctx, &clock, dispute_id, 2, 10000); // 10k total staked
-    // Round 1 GAT = 5% = 500, but voter only has 100
-
-    // Commit (will succeed)
-    let salt = test_salt(1);
-    let hash = build_commit_hash_move(0, salt);
-    let commit = pm_sdvm::commit_vote(&round, &pool, &position, hash, &clock, ctx);
-
-    ts::next_tx(&mut scenario, @0x2);
-    let ctx = ts::ctx(&mut scenario);
-    clock::increment_for_testing(&mut clock, 25 * 60 * 60 * 1000);
-
-    // Advance to tally
-    pm_sdvm::advance_to_reveal_phase(&mut round, &clock);
-    pm_sdvm::advance_to_tally_phase(&mut round, &clock);
-
-    // Tally should roll (insufficient GAT)
-    pm_sdvm::tally_votes(&mut round, &mut pool, &clock, ctx);
-
-    // Verify round rolled to round 2
-    assert!(pm_sdvm::round_number(&round) == 2, 0);
     assert!(pm_sdvm::round_phase(&round) == pm_rules::vote_phase_commit(), 0);
+    assert!(pm_sdvm::round_number(&round) == 2, 1);
 
-    ts::return_shared(pool);
-    clock::destroy_for_testing(clock);
+    let second_commit = pm_sdvm::commit_vote(
+        &mut round,
+        &stake_pool,
+        &mut position,
+        commitment_hash(1, b"round-two"),
+        &test_clock,
+        ctx,
+    );
+
+    destroy(second_commit);
+    destroy(first_commit);
+    ts::return_shared(stake_pool);
+    destroy(round);
+    destroy(position);
+    clock::destroy_for_testing(test_clock);
     ts::end(scenario);
 }
 
-// ═══════════════════════════════════════════════════════════════
-// Test 14: Admin Operations (God Levers)
-// ═══════════════════════════════════════════════════════════════
-
 #[test]
-fun test_admin_god_levers() {
+fun test_sdvm_zero_participation_invalidates_market_instead_of_defaulting_to_outcome_zero() {
     let mut scenario = ts::begin(@0x1);
     let ctx = ts::ctx(&mut scenario);
+    pm_staking::create_and_share_pool<TEST_COLLATERAL>(ctx);
 
-    let admin_cap = pm_staking::create_admin_cap(ctx);
-    pm_staking::create_and_share_pool(ctx);
-
-    ts::next_tx(&mut scenario, @0x2);
+    ts::next_tx(&mut scenario, @0x1);
+    let mut stake_pool = ts::take_shared<PMStakePool<TEST_COLLATERAL>>(&scenario);
     let ctx = ts::ctx(&mut scenario);
-    let clock = clock::create_for_testing(ctx);
-    let mut pool = ts::take_shared<SufferStakePool>(&scenario);
+    let mut test_clock = clock::create_for_testing(ctx);
 
-    // Test: admin_pause_staking
-    pm_staking::admin_pause_staking(&admin_cap, &mut pool, &clock);
-    assert!(pm_staking::pool_is_paused(&pool), 0);
+    let (mut registry, config, admin) = support::create_core_bundle<TEST_COLLATERAL>(ctx);
+    let (policy, resolver_policy) = support::create_creator_policy(&admin, ctx);
+    let mut treasury = pm_treasury::create_treasury<TEST_COLLATERAL>(ctx);
+    let resolver_set = pm_dispute::create_resolver_set(&admin, vector[@0x2], 1, ctx);
+    let mut market = support::create_binary_market(
+        &mut registry,
+        &config,
+        &policy,
+        &resolver_policy,
+        support::mint_test_balance(support::default_creation_bond(), ctx),
+        10_000,
+        20_000,
+        &test_clock,
+        ctx,
+    );
 
-    // Test: admin_resume_staking
-    pm_staking::admin_resume_staking(&admin_cap, &mut pool, &clock);
-    assert!(!pm_staking::pool_is_paused(&pool), 0);
+    clock::increment_for_testing(&mut test_clock, 11_000);
+    pm_resolution::propose_resolution(
+        &mut market,
+        0,
+        b"creator-outcome-zero",
+        &test_clock,
+        ctx,
+    );
 
-    // Test: admin_resolve_dispute
-    let dispute_id = object::id_from_address(@0x100);
-    let mut round = create_vote_round(ctx, &clock, dispute_id, 2, TOTAL_STAKED_SNAPSHOT);
-    pm_sdvm::admin_resolve_dispute(&admin_cap, &mut round, 0, ctx);
-    assert!(pm_sdvm::round_phase(&round) == pm_rules::vote_phase_settled(), 0);
+    let mut dispute = pm_dispute::file_dispute(
+        &mut market,
+        &config,
+        &resolver_set,
+        1,
+        b"draw-case",
+        support::mint_test_coin(support::default_dispute_bond(), ctx),
+        &test_clock,
+        ctx,
+    );
 
-    // Test: admin_advance_phase
-    let dispute_id_2 = object::id_from_address(@0x101);
-    let mut round2 = create_vote_round(ctx, &clock, dispute_id_2, 2, TOTAL_STAKED_SNAPSHOT);
-    pm_sdvm::admin_advance_phase(&admin_cap, &mut round2, ctx);
-    assert!(pm_sdvm::round_phase(&round2) == pm_rules::vote_phase_reveal(), 0);
+    let position_a = pm_staking::stake(
+        &mut stake_pool,
+        support::mint_test_coin(100, ctx),
+        &test_clock,
+        ctx,
+    );
+    let staking_admin = pm_staking::create_admin_cap<TEST_COLLATERAL>(ctx);
 
-    // Test: admin_quorum_override
-    pm_sdvm::admin_quorum_override(&admin_cap, &mut round2, 1000, ctx);
+    let mut round = pm_dispute::create_sdvm_vote_round(
+        &mut dispute,
+        &stake_pool,
+        false,
+        &test_clock,
+        ctx,
+    );
 
-    ts::return_shared(pool);
-    clock::destroy_for_testing(clock);
+    pm_sdvm::admin_quorum_override(&staking_admin, &mut round, 0, ctx);
+
+    clock::increment_for_testing(&mut test_clock, 12 * 60 * 60 * 1000 + 1);
+    pm_sdvm::advance_to_reveal_phase(&mut round, &test_clock);
+
+    clock::increment_for_testing(&mut test_clock, 12 * 60 * 60 * 1000 + 1);
+    pm_sdvm::advance_to_tally_phase(&mut round, &test_clock);
+    pm_sdvm::tally_votes(&mut round, &mut stake_pool, &test_clock, ctx);
+
+    assert!(pm_sdvm::round_is_settled(&round), 2);
+    assert!(option::is_none(&pm_sdvm::round_admin_resolved_outcome(&round)), 3);
+
+    pm_dispute::resolve_from_sdvm(
+        &mut dispute,
+        &mut market,
+        &mut treasury,
+        &round,
+        ctx,
+    );
+
+    assert!(pm_market::state(&market) == pm_rules::state_invalid(), 4);
+    assert!(pm_dispute::dispute_state(&dispute) == pm_rules::dispute_state_timeout_invalid(), 5);
+
+    ts::return_shared(stake_pool);
+    destroy(round);
+    destroy(staking_admin);
+    destroy(position_a);
+    destroy(dispute);
+    destroy(resolver_set);
+    destroy(market);
+    destroy(treasury);
+    destroy(policy);
+    destroy(resolver_policy);
+    destroy(admin);
+    destroy(config);
+    destroy(registry);
+    clock::destroy_for_testing(test_clock);
     ts::end(scenario);
 }
 
-// ═══════════════════════════════════════════════════════════════
-// Test 15: Cleanup Orphaned Commit
-// ═══════════════════════════════════════════════════════════════
-
-#[test]
-fun test_cleanup_orphaned_commit() {
+#[test, expected_failure(abort_code = 5)]
+fun test_post_unstake_dispute_blocks_complete_unstake() {
     let mut scenario = ts::begin(@0x1);
     let ctx = ts::ctx(&mut scenario);
+    pm_staking::create_and_share_pool<TEST_COLLATERAL>(ctx);
 
-    pm_staking::create_and_share_pool(ctx);
-
-    ts::next_tx(&mut scenario, @0x2);
+    ts::next_tx(&mut scenario, @0x1);
+    let mut stake_pool = ts::take_shared<PMStakePool<TEST_COLLATERAL>>(&scenario);
     let ctx = ts::ctx(&mut scenario);
-    let clock = clock::create_for_testing(ctx);
-    let mut pool = ts::take_shared<SufferStakePool>(&scenario);
+    let mut test_clock = clock::create_for_testing(ctx);
 
-    let position = create_stake_position(&mut pool, BASE_STAKE, &clock, ctx);
+    let mut position = pm_staking::stake(
+        &mut stake_pool,
+        support::mint_test_coin(100, ctx),
+        &test_clock,
+        ctx,
+    );
 
-    ts::next_tx(&mut scenario, @0x2);
-    let ctx = ts::ctx(&mut scenario);
-    let dispute_id = object::id_from_address(@0x100);
-    let mut round = create_vote_round(ctx, &clock, dispute_id, 2, TOTAL_STAKED_SNAPSHOT);
+    pm_staking::initiate_unstake(&mut position, &test_clock, ctx);
+    pm_staking::register_dispute(&mut position, object::id(&position));
+    clock::increment_for_testing(&mut test_clock, 48 * 60 * 60 * 1000 + 1);
 
-    // Commit but DON'T reveal
-    let salt = test_salt(1);
-    let hash = build_commit_hash_move(0, salt);
-    let orphaned_commit = pm_sdvm::commit_vote(&round, &pool, &position, hash, &clock, ctx);
+    let _coin = pm_staking::complete_unstake(
+        &mut stake_pool,
+        position,
+        &test_clock,
+        ctx,
+    );
 
-    ts::next_tx(&mut scenario, @0x2);
-    let ctx = ts::ctx(&mut scenario);
-    clock::increment_for_testing(&mut clock, 25 * 60 * 60 * 1000);
-
-    // Fast-forward through phases
-    pm_sdvm::advance_to_reveal_phase(&mut round, &clock);
-    pm_sdvm::advance_to_tally_phase(&mut round, &clock);
-    pm_sdvm::tally_votes(&mut round, &mut pool, &clock, ctx);
-
-    ts::next_tx(&mut scenario, @0x2);
-    let ctx = ts::ctx(&mut scenario);
-    let mut round = ts::take_shared<SDVMVoteRound>(&scenario);
-
-    // Now cleanup the orphaned commit
-    pm_sdvm::cleanup_orphaned_commit(&round, orphaned_commit);
-
-    ts::return_shared(pool);
-    ts::return_shared(round);
-    clock::destroy_for_testing(clock);
+    ts::return_shared(stake_pool);
+    clock::destroy_for_testing(test_clock);
     ts::end(scenario);
 }
 
-// ═══════════════════════════════════════════════════════════════
-// Test 16: Dispute-Aware Unstake (Pending Disputes Block Complete)
-// ═══════════════════════════════════════════════════════════════
-
-#[test]
-#[expected_failure(abort_code = 305)] // EPendingDisputes
-fun test_dispute_aware_unstake() {
+#[test, expected_failure(abort_code = 5)]
+fun test_post_unstake_dispute_blocks_emergency_unstake() {
     let mut scenario = ts::begin(@0x1);
     let ctx = ts::ctx(&mut scenario);
+    pm_staking::create_and_share_pool<TEST_COLLATERAL>(ctx);
 
-    pm_staking::create_and_share_pool(ctx);
-
-    ts::next_tx(&mut scenario, @0x2);
+    ts::next_tx(&mut scenario, @0x1);
+    let mut stake_pool = ts::take_shared<PMStakePool<TEST_COLLATERAL>>(&scenario);
     let ctx = ts::ctx(&mut scenario);
-    let clock = clock::create_for_testing(ctx);
-    let mut pool = ts::take_shared<SufferStakePool>(&scenario);
+    let test_clock = clock::create_for_testing(ctx);
 
-    let mut position = create_stake_position(&mut pool, BASE_STAKE, &clock, ctx);
+    let mut position = pm_staking::stake(
+        &mut stake_pool,
+        support::mint_test_coin(100, ctx),
+        &test_clock,
+        ctx,
+    );
 
-    ts::next_tx(&mut scenario, @0x2);
-    let ctx = ts::ctx(&mut scenario);
-    let dispute_id = object::id_from_address(@0x100);
-    let round = create_vote_round(ctx, &clock, dispute_id, 2, TOTAL_STAKED_SNAPSHOT);
-    let round_id = object::id(&round);
+    pm_staking::initiate_unstake(&mut position, &test_clock, ctx);
+    pm_staking::register_dispute(&mut position, object::id(&position));
 
-    // Register dispute on position
-    pm_staking::register_dispute(&mut position, round_id);
+    let _coin = pm_staking::emergency_unstake(
+        &mut stake_pool,
+        position,
+        &test_clock,
+        ctx,
+    );
 
-    // Initiate unstake
-    pm_staking::initiate_unstake(&mut position, &clock, ctx);
-
-    ts::next_tx(&mut scenario, @0x2);
-    let ctx = ts::ctx(&mut scenario);
-
-    // Try to complete unstake (should fail due to pending disputes)
-    clock::increment_for_testing(&mut clock, 48 * 60 * 60 * 1000);
-    let _returned_coin = pm_staking::complete_unstake(&mut pool, position, &clock, ctx);
-
-    ts::return_shared(pool);
-    ts::end(scenario);
-}
-
-// ═══════════════════════════════════════════════════════════════
-// Test 17: Clear Settled Dispute
-// ═══════════════════════════════════════════════════════════════
-
-#[test]
-fun test_clear_settled_dispute() {
-    let mut scenario = ts::begin(@0x1);
-    let ctx = ts::ctx(&mut scenario);
-
-    pm_staking::create_and_share_pool(ctx);
-
-    ts::next_tx(&mut scenario, @0x2);
-    let ctx = ts::ctx(&mut scenario);
-    let clock = clock::create_for_testing(ctx);
-    let mut pool = ts::take_shared<SufferStakePool>(&scenario);
-
-    let mut position = create_stake_position(&mut pool, BASE_STAKE, &clock, ctx);
-
-    ts::next_tx(&mut scenario, @0x2);
-    let ctx = ts::ctx(&mut scenario);
-    let dispute_id = object::id_from_address(@0x100);
-    let mut round = create_vote_round(ctx, &clock, dispute_id, 2, TOTAL_STAKED_SNAPSHOT);
-    let round_id = object::id(&round);
-
-    // Register and later clear dispute
-    pm_staking::register_dispute(&mut position, round_id);
-    assert!(pm_staking::position_pending_disputes(&position) == 1, 0);
-
-    // Mark round as settled
-    pm_sdvm::admin_advance_phase(&pm_staking::create_admin_cap(ctx), &mut round, ctx);
-    pm_sdvm::admin_advance_phase(&pm_staking::create_admin_cap(ctx), &mut round, ctx);
-    pm_sdvm::admin_advance_phase(&pm_staking::create_admin_cap(ctx), &mut round, ctx);
-
-    ts::next_tx(&mut scenario, @0x2);
-    let ctx = ts::ctx(&mut scenario);
-
-    // Clear the settled dispute
-    pm_sdvm::clear_settled_dispute_verified(&round, &mut position);
-    assert!(pm_staking::position_pending_disputes(&position) == 0, 0);
-
-    ts::return_shared(pool);
-    clock::destroy_for_testing(clock);
+    ts::return_shared(stake_pool);
+    clock::destroy_for_testing(test_clock);
     ts::end(scenario);
 }

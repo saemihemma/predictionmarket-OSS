@@ -133,11 +133,15 @@ public fun creator_influence_indirect(): u8 { CREATOR_INFLUENCE_INDIRECT }
 public fun creator_influence_direct(): u8 { CREATOR_INFLUENCE_DIRECT }
 
 // Source classes
+public fun source_class_official_api(): u8 { SOURCE_CLASS_OFFICIAL_API }
+public fun source_class_public_doc(): u8 { SOURCE_CLASS_PUBLIC_DOCUMENT_URL }
 public fun source_class_onchain_state(): u8 { SOURCE_CLASS_ONCHAIN_STATE }
 public fun source_class_verifier_output(): u8 { SOURCE_CLASS_VERIFIER_OUTPUT }
 public fun source_class_world_api(): u8 { SOURCE_CLASS_WORLD_API }
 
 // Evidence formats
+public fun evidence_format_screenshot_hash(): u8 { EVIDENCE_FORMAT_SCREENSHOT_HASH }
+public fun evidence_format_api_hash(): u8 { EVIDENCE_FORMAT_API_RESPONSE_HASH }
 public fun evidence_format_verifier_snapshot_hash(): u8 { EVIDENCE_FORMAT_VERIFIER_SNAPSHOT_HASH }
 public fun evidence_format_tx_hash(): u8 { EVIDENCE_FORMAT_TX_HASH }
 

@@ -14,7 +14,7 @@ const EInsufficientQuantity: vector<u8> = b"Insufficient position quantity for s
 const EPositionOwnerMismatch: vector<u8> = b"Position owner does not match sender";
 
 /// Aggregate position: one per (user, market, outcome).
-public struct PMPosition has key, store {
+public struct PMPosition<phantom Collateral> has key, store {
     id: UID,
     market_id: ID,
     owner: address,
@@ -31,7 +31,7 @@ public struct PMPosition has key, store {
 // ── Creation ──
 
 /// Create a new position for a first-time buyer of this outcome.
-public(package) fun create(
+public(package) fun create<Collateral>(
     market_id: ID,
     owner: address,
     outcome_index: u16,
@@ -39,8 +39,8 @@ public(package) fun create(
     cost: u64,
     current_time_ms: u64,
     ctx: &mut TxContext,
-): PMPosition {
-    PMPosition {
+): PMPosition<Collateral> {
+    PMPosition<Collateral> {
         id: object::new(ctx),
         market_id,
         owner,
@@ -55,8 +55,8 @@ public(package) fun create(
 
 /// Merge additional shares into an existing position.
 /// Called when user buys more of the same outcome on the same market.
-public(package) fun merge(
-    position: &mut PMPosition,
+public(package) fun merge<Collateral>(
+    position: &mut PMPosition<Collateral>,
     additional_quantity: u64,
     additional_cost: u64,
 ) {
@@ -68,8 +68,8 @@ public(package) fun merge(
 
 /// Reduce position by sold quantity. Returns the proportional cost basis reduction.
 /// Accounting: cost_reduction = net_cost_basis * quantity_sold / quantity_held
-public(package) fun reduce(
-    position: &mut PMPosition,
+public(package) fun reduce<Collateral>(
+    position: &mut PMPosition<Collateral>,
     quantity_sold: u64,
 ): u64 {
     assert!(position.quantity >= quantity_sold, EInsufficientQuantity);
@@ -89,43 +89,43 @@ public(package) fun reduce(
 }
 
 /// Check if position is fully depleted (zero quantity).
-public fun is_empty(position: &PMPosition): bool {
+public fun is_empty<Collateral>(position: &PMPosition<Collateral>): bool {
     position.quantity == 0
 }
 
 // ── Read accessors ──
 
-public fun market_id(p: &PMPosition): ID { p.market_id }
-public fun owner(p: &PMPosition): address { p.owner }
-public fun outcome_index(p: &PMPosition): u16 { p.outcome_index }
-public fun quantity(p: &PMPosition): u64 { p.quantity }
-public fun net_cost_basis(p: &PMPosition): u64 { p.net_cost_basis }
-public fun created_at_ms(p: &PMPosition): u64 { p.created_at_ms }
+public fun market_id<Collateral>(p: &PMPosition<Collateral>): ID { p.market_id }
+public fun owner<Collateral>(p: &PMPosition<Collateral>): address { p.owner }
+public fun outcome_index<Collateral>(p: &PMPosition<Collateral>): u16 { p.outcome_index }
+public fun quantity<Collateral>(p: &PMPosition<Collateral>): u64 { p.quantity }
+public fun net_cost_basis<Collateral>(p: &PMPosition<Collateral>): u64 { p.net_cost_basis }
+public fun created_at_ms<Collateral>(p: &PMPosition<Collateral>): u64 { p.created_at_ms }
 
 // ── Assertions ──
 
-public fun assert_market(position: &PMPosition, market_id: ID) {
+public fun assert_market<Collateral>(position: &PMPosition<Collateral>, market_id: ID) {
     assert!(position.market_id == market_id, EPositionMarketMismatch);
 }
 
-public fun assert_outcome(position: &PMPosition, outcome_index: u16) {
+public fun assert_outcome<Collateral>(position: &PMPosition<Collateral>, outcome_index: u16) {
     assert!(position.outcome_index == outcome_index, EPositionOutcomeMismatch);
 }
 
-public fun assert_owner(position: &PMPosition, ctx: &TxContext) {
+public fun assert_owner<Collateral>(position: &PMPosition<Collateral>, ctx: &TxContext) {
     assert!(position.owner == tx_context::sender(ctx), EPositionOwnerMismatch);
 }
 
 // ── Destroy ──
 
 /// Destroy an empty position.
-public(package) fun destroy_empty(position: PMPosition) {
-    let PMPosition { id, market_id: _, owner: _, outcome_index: _, quantity: _, net_cost_basis: _, created_at_ms: _ } = position;
+public(package) fun destroy_empty<Collateral>(position: PMPosition<Collateral>) {
+    let PMPosition<Collateral> { id, market_id: _, owner: _, outcome_index: _, quantity: _, net_cost_basis: _, created_at_ms: _ } = position;
     object::delete(id);
 }
 
 /// Destroy a position during claim or invalid refund (may have non-zero quantity).
-public(package) fun destroy(position: PMPosition) {
-    let PMPosition { id, market_id: _, owner: _, outcome_index: _, quantity: _, net_cost_basis: _, created_at_ms: _ } = position;
+public(package) fun destroy<Collateral>(position: PMPosition<Collateral>) {
+    let PMPosition<Collateral> { id, market_id: _, owner: _, outcome_index: _, quantity: _, net_cost_basis: _, created_at_ms: _ } = position;
     object::delete(id);
 }

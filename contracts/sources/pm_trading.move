@@ -4,9 +4,7 @@
 module prediction_market::pm_trading;
 
 use sui::{balance, coin::{Self, Coin}, clock::Clock, event};
-use std::option;
 use prediction_market::{
-    suffer::SUFFER,
     pm_rules,
     pm_math,
     pm_market::{Self, PMMarket},
@@ -45,7 +43,7 @@ const EInvalidOutcomeIndex: vector<u8> = b"Outcome index out of bounds";
 
 // ── Events ──
 
-public struct TradeExecutedEvent has copy, drop {
+public struct TradeExecutedEvent<phantom Collateral> has copy, drop {
     market_id: ID,
     trader: address,
     direction: u8,
@@ -55,20 +53,20 @@ public struct TradeExecutedEvent has copy, drop {
     fee: u64,
 }
 
-public struct ClaimExecutedEvent has copy, drop {
+public struct ClaimExecutedEvent<phantom Collateral> has copy, drop {
     market_id: ID,
     claimer: address,
     outcome_index: u16,
     payout: u64,
 }
 
-public struct InvalidRefundExecutedEvent has copy, drop {
+public struct InvalidRefundExecutedEvent<phantom Collateral> has copy, drop {
     market_id: ID,
     claimer: address,
     refund_amount: u64,
 }
 
-public struct CreationBondReturnedEvent has copy, drop {
+public struct CreationBondReturnedEvent<phantom Collateral> has copy, drop {
     market_id: ID,
     creator: address,
     bond_amount: u64,
@@ -80,18 +78,17 @@ const BPS_DENOMINATOR: u64 = 10_000;
 // ── Buy ──
 
 /// Buy shares of an outcome. Creates a new position or merges into existing.
-#[allow(lint(self_transfer))]
-public fun buy(
-    market: &mut PMMarket,
-    config: &PMConfig,
+public fun buy<Collateral>(
+    market: &mut PMMarket<Collateral>,
+    config: &PMConfig<Collateral>,
     clock: &Clock,
     outcome_index: u16,
     amount: u64,
     max_cost: u64,
     deadline_ms: u64,
-    mut payment: Coin<SUFFER>,
+    mut payment: Coin<Collateral>,
     ctx: &mut TxContext,
-): PMPosition {
+): PMPosition<Collateral> {
     assert!(amount > 0, EZeroAmount);
     assert!(pm_market::outcome_count(market) >= 2, EInsufficientOutcomes);  // Now supports N ≥ 2
     assert!((outcome_index as u64) < (pm_market::outcome_count(market) as u64), EInvalidOutcomeIndex);
@@ -147,27 +144,12 @@ public fun buy(
     pm_market::sub_outcome_quantity(market, outcome_index, amount);
 
     let n = pm_market::outcome_count(market);
-    if (n == 2) {
-        let other_index: u16 = if (outcome_index == 0) { 1 } else { 0 };
-        pm_market::add_outcome_quantity(market, other_index, cost);
-    } else {
-        // For N > 2: distribute cost equally across N-1 other outcomes
-        // cost_per_other = cost / (n - 1)
-        let cost_per_other = cost / ((n - 1) as u64);
-        let remainder = cost - (cost_per_other * ((n - 1) as u64));
-
-        let mut i = 0u16;
-        while (i < n) {
-            if (i != outcome_index) {
-                let add_amount = if (i == outcome_index + 1 && remainder > 0) {
-                    cost_per_other + remainder
-                } else {
-                    cost_per_other
-                };
-                pm_market::add_outcome_quantity(market, i, add_amount);
-            };
-            i = i + 1;
+    let mut i = 0u16;
+    while (i < n) {
+        if (i != outcome_index) {
+            pm_market::add_outcome_quantity(market, i, cost);
         };
+        i = i + 1;
     };
 
     // Note: solvency is guaranteed by CPMM construction — ceiling division on buy
@@ -184,7 +166,7 @@ public fun buy(
 
     let market_id = pm_market::market_id(market);
 
-    event::emit(TradeExecutedEvent {
+    event::emit(TradeExecutedEvent<Collateral> {
         market_id,
         trader: tx_context::sender(ctx),
         direction: pm_rules::direction_buy(),
@@ -207,16 +189,16 @@ public fun buy(
 }
 
 /// Buy and merge into an existing position.
-public fun buy_merge(
-    market: &mut PMMarket,
-    config: &PMConfig,
+public fun buy_merge<Collateral>(
+    market: &mut PMMarket<Collateral>,
+    config: &PMConfig<Collateral>,
     clock: &Clock,
     outcome_index: u16,
     amount: u64,
     max_cost: u64,
     deadline_ms: u64,
-    payment: Coin<SUFFER>,
-    position: &mut PMPosition,
+    payment: Coin<Collateral>,
+    position: &mut PMPosition<Collateral>,
     ctx: &mut TxContext,
 ) {
     pm_position::assert_market(position, pm_market::market_id(market));
@@ -231,12 +213,11 @@ public fun buy_merge(
 // ── Sell ──
 
 /// Sell shares from an existing position.
-#[allow(lint(self_transfer))]
-public fun sell(
-    market: &mut PMMarket,
-    config: &PMConfig,
+public fun sell<Collateral>(
+    market: &mut PMMarket<Collateral>,
+    config: &PMConfig<Collateral>,
     clock: &Clock,
-    position: &mut PMPosition,
+    position: &mut PMPosition<Collateral>,
     amount: u64,
     min_proceeds: u64,
     deadline_ms: u64,
@@ -292,27 +273,12 @@ public fun sell(
     pm_market::add_outcome_quantity(market, outcome_index, amount);
 
     let n = pm_market::outcome_count(market);
-    if (n == 2) {
-        let other_index: u16 = if (outcome_index == 0) { 1 } else { 0 };
-        pm_market::sub_outcome_quantity(market, other_index, proceeds);
-    } else {
-        // For N > 2: withdraw proceeds equally from N-1 other outcomes
-        // proceeds_per_other = proceeds / (n - 1)
-        let proceeds_per_other = proceeds / ((n - 1) as u64);
-        let remainder = proceeds - (proceeds_per_other * ((n - 1) as u64));
-
-        let mut i = 0u16;
-        while (i < n) {
-            if (i != outcome_index) {
-                let sub_amount = if (i == outcome_index + 1 && remainder > 0) {
-                    proceeds_per_other + remainder
-                } else {
-                    proceeds_per_other
-                };
-                pm_market::sub_outcome_quantity(market, i, sub_amount);
-            };
-            i = i + 1;
+    let mut i = 0u16;
+    while (i < n) {
+        if (i != outcome_index) {
+            pm_market::sub_outcome_quantity(market, i, proceeds);
         };
+        i = i + 1;
     };
 
     // Note: solvency is guaranteed by CPMM construction — floor division on sell
@@ -327,7 +293,7 @@ public fun sell(
     let proceeds_coin = coin::from_balance(proceeds_balance, ctx);
     transfer::public_transfer(proceeds_coin, tx_context::sender(ctx));
 
-    event::emit(TradeExecutedEvent {
+    event::emit(TradeExecutedEvent<Collateral> {
         market_id,
         trader: tx_context::sender(ctx),
         direction: pm_rules::direction_sell(),
@@ -341,11 +307,10 @@ public fun sell(
 // ── Claim (resolved market) ──
 
 /// Claim payout for a winning position on a resolved market.
-#[allow(lint(self_transfer))]
-public fun claim(
-    market: &mut PMMarket,
-    config: &PMConfig,
-    position: PMPosition,
+public fun claim<Collateral>(
+    market: &mut PMMarket<Collateral>,
+    config: &PMConfig<Collateral>,
+    position: PMPosition<Collateral>,
     ctx: &mut TxContext,
 ) {
     assert!(!pm_market::is_emergency_paused(market), EEmergencyPaused);
@@ -383,7 +348,7 @@ public fun claim(
         let payout_coin = coin::from_balance(payout_balance, ctx);
         transfer::public_transfer(payout_coin, tx_context::sender(ctx));
 
-        event::emit(ClaimExecutedEvent {
+        event::emit(ClaimExecutedEvent<Collateral> {
             market_id,
             claimer: tx_context::sender(ctx),
             outcome_index,
@@ -391,7 +356,7 @@ public fun claim(
         });
     } else {
         // Losing position: no payout
-        event::emit(ClaimExecutedEvent {
+        event::emit(ClaimExecutedEvent<Collateral> {
             market_id,
             claimer: tx_context::sender(ctx),
             outcome_index,
@@ -407,10 +372,9 @@ public fun claim(
 /// Refund a position holder on an invalidated market.
 /// Pro-rata distribution: refund = (my_cost_basis / total_cost_basis_sum) * snapshot_collateral.
 /// This prevents bank-run dynamics where early claimers drain the pool.
-#[allow(lint(self_transfer))]
-public fun refund_invalid(
-    market: &mut PMMarket,
-    position: PMPosition,
+public fun refund_invalid<Collateral>(
+    market: &mut PMMarket<Collateral>,
+    position: PMPosition<Collateral>,
     ctx: &mut TxContext,
 ) {
     assert!(pm_market::state(market) == pm_rules::state_invalid(), EMarketNotInvalid);
@@ -441,7 +405,7 @@ public fun refund_invalid(
         transfer::public_transfer(refund_coin, tx_context::sender(ctx));
     };
 
-    event::emit(InvalidRefundExecutedEvent {
+    event::emit(InvalidRefundExecutedEvent<Collateral> {
         market_id,
         claimer: tx_context::sender(ctx),
         refund_amount: actual_refund,
@@ -454,8 +418,8 @@ public fun refund_invalid(
 
 /// Close a market that has passed its close time. Anyone can call this.
 /// Sui has no cron — this lazy close is triggered by the first caller after close_time.
-public fun close_market(
-    market: &mut PMMarket,
+public fun close_market<Collateral>(
+    market: &mut PMMarket<Collateral>,
     clock: &Clock,
 ) {
     let current_time = sui::clock::timestamp_ms(clock);
@@ -468,9 +432,9 @@ public fun close_market(
 /// Blocked during emergency pause to prevent extraction during incident response.
 /// RT-032: Sweep deadline validation — callers should only call on resolved/invalid markets.
 /// If only called via treasury deposit path, this is enforced transitively.
-public fun sweep_fees(
-    market: &mut PMMarket,
-    treasury: &mut prediction_market::pm_treasury::PMTreasury,
+public fun sweep_fees<Collateral>(
+    market: &mut PMMarket<Collateral>,
+    treasury: &mut prediction_market::pm_treasury::PMTreasury<Collateral>,
 ) {
     assert!(!pm_market::is_emergency_paused(market), EEmergencyPaused);
     let market_id = pm_market::market_id(market);
@@ -483,8 +447,8 @@ public fun sweep_fees(
 /// Return creation bond to market creator after normal resolution.
 /// Only callable when market is RESOLVED and resolution is finalized.
 /// Blocked during emergency pause.
-public fun return_creator_bond(
-    market: &mut PMMarket,
+public fun return_creator_bond<Collateral>(
+    market: &mut PMMarket<Collateral>,
     ctx: &mut TxContext,
 ) {
     assert!(!pm_market::is_emergency_paused(market), EEmergencyPaused);
@@ -503,7 +467,7 @@ public fun return_creator_bond(
     let bond_coin = coin::from_balance(bond, ctx);
     transfer::public_transfer(bond_coin, creator);
 
-    event::emit(CreationBondReturnedEvent {
+    event::emit(CreationBondReturnedEvent<Collateral> {
         market_id,
         creator,
         bond_amount,

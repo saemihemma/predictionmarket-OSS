@@ -5,9 +5,8 @@ module prediction_market::pm_market;
 use std::string::String;
 use sui::{balance::{Self, Balance}, clock::Clock, coin, event};
 use prediction_market::{
-    suffer::SUFFER,
     pm_rules,
-    pm_source::SourceDeclaration,
+    pm_source::{Self, SourceDeclaration},
     pm_registry::{Self, PMRegistry, PMConfig, PMAdminCap},
     pm_policy::{Self, PMMarketTypePolicy, PMResolverPolicy},
 };
@@ -51,12 +50,12 @@ const EInsufficientCreationBond: vector<u8> = b"Insufficient creation bond amoun
 const ECannotUnpauseTerminal: vector<u8> = b"Cannot unpause a market in terminal state";
 #[error(code = 20)]
 const ELabelCountMismatch: vector<u8> = b"Outcome labels count must match outcome count";
-#[error(code = 21)]
-const EInvalidOutcomeRange: vector<u8> = b"Outcome count must be between 2 and 8";
+#[error(code = 22)]
+const EInvalidLiquidityParam: vector<u8> = b"Liquidity param must be between 1 and 10000";
 
 // ── Events ──
 
-public struct MarketCreatedEvent has copy, drop {
+public struct MarketCreatedEvent<phantom Collateral> has copy, drop {
     market_id: ID,
     creator: address,
     market_type: u8,
@@ -70,32 +69,32 @@ public struct MarketCreatedEvent has copy, drop {
     outcome_count: u16,
 }
 
-public struct MarketFrozenEvent has copy, drop {
+public struct MarketFrozenEvent<phantom Collateral> has copy, drop {
     market_id: ID,
 }
 
-public struct MarketClosedEvent has copy, drop {
+public struct MarketClosedEvent<phantom Collateral> has copy, drop {
     market_id: ID,
     closed_at_ms: u64,
 }
 
-public struct MarketResolvedEvent has copy, drop {
+public struct MarketResolvedEvent<phantom Collateral> has copy, drop {
     market_id: ID,
     outcome: u16,
     finalized: bool,
 }
 
-public struct MarketInvalidatedEvent has copy, drop {
+public struct MarketInvalidatedEvent<phantom Collateral> has copy, drop {
     market_id: ID,
     reason: u8,
 }
 
-public struct EmergencyPauseEvent has copy, drop {
+public struct EmergencyPauseEvent<phantom Collateral> has copy, drop {
     market_id: ID,
     paused_by: address,
 }
 
-public struct EmergencyUnpauseEvent has copy, drop {
+public struct EmergencyUnpauseEvent<phantom Collateral> has copy, drop {
     market_id: ID,
 }
 
@@ -118,7 +117,7 @@ public struct PMResolutionRecord has store, copy, drop {
 }
 
 /// The core market object. Shared — one per market.
-public struct PMMarket has key {
+public struct PMMarket<phantom Collateral> has key {
     id: UID,
     market_number: u64,
 
@@ -150,15 +149,15 @@ public struct PMMarket has key {
 
     // ── Embedded AMM pool state (runtime-mutable) ──
     outcome_quantities: vector<u64>,
-    total_collateral: Balance<SUFFER>,
-    accrued_fees: Balance<SUFFER>,
+    total_collateral: Balance<Collateral>,
+    accrued_fees: Balance<Collateral>,
 
     // ── Cost basis tracking (for pro-rata invalidation refunds) ──
     total_cost_basis_sum: u64,
 
     // ── Bonds ──
-    creation_bond: Balance<SUFFER>,
-    community_resolution_bond: Option<Balance<SUFFER>>,
+    creation_bond: Balance<Collateral>,
+    community_resolution_bond: Option<Balance<Collateral>>,
     community_resolution_proposer: Option<address>,
 
     // ── Resolution (set once when resolution is proposed) ──
@@ -175,11 +174,11 @@ public struct PMMarket has key {
 
 // ── Creation ──
 
-public fun create_market(
-    registry: &mut PMRegistry,
-    config: &PMConfig,
-    policy: &PMMarketTypePolicy,
-    resolver_policy: &PMResolverPolicy,
+public fun create_market<Collateral>(
+    registry: &mut PMRegistry<Collateral>,
+    config: &PMConfig<Collateral>,
+    policy: &PMMarketTypePolicy<Collateral>,
+    resolver_policy: &PMResolverPolicy<Collateral>,
     title: String,
     description: String,
     resolution_text: String,
@@ -189,10 +188,10 @@ public fun create_market(
     creator_influence: CreatorInfluence,
     close_time_ms: u64,
     resolve_deadline_ms: u64,
-    creation_bond: Balance<SUFFER>,
+    creation_bond: Balance<Collateral>,
     clock: &Clock,
     ctx: &mut TxContext,
-): PMMarket {
+): PMMarket<Collateral> {
     let current_time_ms = sui::clock::timestamp_ms(clock);
 
     // Validate registry not paused
@@ -205,6 +204,8 @@ public fun create_market(
         pm_policy::policy_trust_tier(policy),
         pm_policy::policy_resolution_class(policy),
         outcome_count,
+        pm_source::source_class(&source_declaration),
+        pm_source::evidence_format(&source_declaration),
     );
     assert!(pm_policy::resolver_is_active(resolver_policy), EResolverPolicyNotActive);
 
@@ -227,6 +228,7 @@ public fun create_market(
     // Validate outcome count (supports binary N=2 and categorical N=3-16)
     let max_for_type = pm_rules::max_outcomes_for_type(pm_policy::policy_market_type(policy));
     assert!(outcome_count >= 2 && outcome_count <= max_for_type, EInvalidOutcomeCount);
+    assert!(outcome_count <= pm_registry::max_outcomes(config), EInvalidOutcomeCount);
 
     // RT-OVERFLOW-FIX: Prevent u128 overflow in CPMM math by capping reserves for N-outcome markets.
     // The cp_buy_cost/cp_sell_proceeds functions compute product of (N-1) reserves.
@@ -235,11 +237,11 @@ public fun create_market(
     //   N=3-4: reserves up to 10^9 (safe)
     //   N=5-8: reserves up to 10^4 (100 SFR)
     //   N>8: NOT SAFE without binary search (deferred to v2)
-    // For testnet, we cap N<=8 and initial_reserve to 100 SFR (10,000 base units)
+    // For testnet/public beta, we cap N<=8 and initial_reserve <= 10,000 base units.
     // This ensures product of 7 reserves: (10,000)^7 = 10^28 < u128::MAX (3.4e38)
     if (outcome_count > 8) {
         // Future enhancement: implement binary search or use different pricing model
-        abort(19); // EInvalidOutcomeCount
+        abort(19) // EInvalidOutcomeCount
     };
 
     // Validate bond amount
@@ -247,14 +249,14 @@ public fun create_market(
     assert!(balance::value(&creation_bond) >= required_bond, EInsufficientCreationBond);
 
     let market_number = pm_registry::increment_market_count(registry);
-    let dispute_window_ms = pm_policy::resolver_dispute_window_for_class(
-        resolver_policy,
+    let dispute_window_ms = pm_registry::dispute_window_for_class(
+        config,
         pm_policy::policy_resolution_class(policy),
     );
 
-    // Initialize pool reserves to CPMM liquidity parameter (1 SFR per outcome)
-    // This is required for constant-product AMM to function — reserves must be non-zero.
-    let initial_reserve: u64 = 100; // 1 SFR = 10^2 base units
+    // Initialize pool reserves from live protocol config.
+    let initial_reserve: u64 = pm_registry::liquidity_param(config);
+    assert!(initial_reserve > 0 && initial_reserve <= 10_000, EInvalidLiquidityParam);
     let mut outcome_quantities = vector::empty<u64>();
     let mut i: u16 = 0;
     while (i < outcome_count) {
@@ -262,7 +264,7 @@ public fun create_market(
         i = i + 1;
     };
 
-    let market = PMMarket {
+    let market = PMMarket<Collateral> {
         id: object::new(ctx),
         market_number,
         creator: tx_context::sender(ctx),
@@ -286,8 +288,8 @@ public fun create_market(
         frozen: false,
         created_at_ms: current_time_ms,
         outcome_quantities,
-        total_collateral: balance::zero<SUFFER>(),
-        accrued_fees: balance::zero<SUFFER>(),
+        total_collateral: balance::zero<Collateral>(),
+        accrued_fees: balance::zero<Collateral>(),
         total_cost_basis_sum: 0,
         creation_bond,
         community_resolution_bond: option::none(),
@@ -298,7 +300,7 @@ public fun create_market(
     };
 
     // RT-034: market_id included in event for frontend indexing ✓
-    event::emit(MarketCreatedEvent {
+    event::emit(MarketCreatedEvent<Collateral> {
         market_id: object::id(&market),
         creator: tx_context::sender(ctx),
         market_type: pm_policy::policy_market_type(policy),
@@ -315,13 +317,54 @@ public fun create_market(
     market
 }
 
+/// Public convenience wrapper for live market creation.
+/// This is the community-facing create path and does not require admin authority.
+public fun create_and_share_market<Collateral>(
+    registry: &mut PMRegistry<Collateral>,
+    config: &PMConfig<Collateral>,
+    policy: &PMMarketTypePolicy<Collateral>,
+    resolver_policy: &PMResolverPolicy<Collateral>,
+    title: String,
+    description: String,
+    resolution_text: String,
+    outcome_count: u16,
+    outcome_labels: vector<String>,
+    source_declaration: SourceDeclaration,
+    creator_influence: CreatorInfluence,
+    close_time_ms: u64,
+    resolve_deadline_ms: u64,
+    creation_bond: Balance<Collateral>,
+    clock: &Clock,
+    ctx: &mut TxContext,
+) {
+    let market = create_market(
+        registry,
+        config,
+        policy,
+        resolver_policy,
+        title,
+        description,
+        resolution_text,
+        outcome_count,
+        outcome_labels,
+        source_declaration,
+        creator_influence,
+        close_time_ms,
+        resolve_deadline_ms,
+        creation_bond,
+        clock,
+        ctx,
+    );
+    share_market(market);
+}
+
 // ── Freeze on first trade ──
 
 /// Called by trading module on first trade. Sets frozen = true, emits event.
-public(package) fun freeze_if_needed(market: &mut PMMarket) {
+public(package) fun freeze_if_needed<Collateral>(market: &mut PMMarket<Collateral>) {
     if (!market.frozen) {
         market.frozen = true;
-        event::emit(MarketFrozenEvent {
+        event::emit(MarketFrozenEvent<Collateral> {
             market_id: object::id(market),
         });
     };
@@ -330,11 +373,11 @@ public(package) fun freeze_if_needed(market: &mut PMMarket) {
 // ── State transitions ──
 
 /// Transition to CLOSED. Called on first interaction after close_time.
-public(package) fun transition_to_closed(market: &mut PMMarket, current_time_ms: u64) {
+public(package) fun transition_to_closed<Collateral>(market: &mut PMMarket<Collateral>, current_time_ms: u64) {
     assert!(market.state == pm_rules::state_open(), EInvalidStateTransition);
     assert!(current_time_ms >= market.close_time_ms, EMarketNotOpen);
     market.state = pm_rules::state_closed();
-    event::emit(MarketClosedEvent {
+    event::emit(MarketClosedEvent<Collateral> {
         market_id: object::id(market),
         closed_at_ms: current_time_ms,
     });
@@ -346,10 +389,10 @@ public(package) fun transition_to_closed(market: &mut PMMarket, current_time_ms:
 /// resolution/invalidation entry points call this to ensure CLOSED precondition
 /// without requiring a separate close_market transaction.
 /// No race condition: idempotent within a single Move call.
-public(package) fun ensure_closed(market: &mut PMMarket, current_time_ms: u64) {
+public(package) fun ensure_closed<Collateral>(market: &mut PMMarket<Collateral>, current_time_ms: u64) {
     if (market.state == pm_rules::state_open() && current_time_ms >= market.close_time_ms) {
         market.state = pm_rules::state_closed();
-        event::emit(MarketClosedEvent {
+        event::emit(MarketClosedEvent<Collateral> {
             market_id: object::id(market),
             closed_at_ms: current_time_ms,
         });
@@ -357,8 +400,8 @@ public(package) fun ensure_closed(market: &mut PMMarket, current_time_ms: u64) {
 }
 
 /// Transition to RESOLUTION_PENDING when resolution is proposed.
-public(package) fun transition_to_resolution_pending(
-    market: &mut PMMarket,
+public(package) fun transition_to_resolution_pending<Collateral>(
+    market: &mut PMMarket<Collateral>,
     record: PMResolutionRecord,
 ) {
     assert!(market.state == pm_rules::state_closed(), EInvalidStateTransition);
@@ -367,13 +410,13 @@ public(package) fun transition_to_resolution_pending(
 }
 
 /// Transition to DISPUTED.
-public(package) fun transition_to_disputed(market: &mut PMMarket) {
+public(package) fun transition_to_disputed<Collateral>(market: &mut PMMarket<Collateral>) {
     assert!(market.state == pm_rules::state_resolution_pending(), EInvalidStateTransition);
     market.state = pm_rules::state_disputed();
 }
 
 /// Finalize resolution — transition to RESOLVED (terminal).
-public(package) fun transition_to_resolved(market: &mut PMMarket) {
+public(package) fun transition_to_resolved<Collateral>(market: &mut PMMarket<Collateral>) {
     assert!(
         market.state == pm_rules::state_resolution_pending() ||
         market.state == pm_rules::state_disputed(),
@@ -385,7 +428,7 @@ public(package) fun transition_to_resolved(market: &mut PMMarket) {
     res.finalized = true;
     let outcome = res.resolved_outcome;
     market.state = pm_rules::state_resolved();
-    event::emit(MarketResolvedEvent {
+    event::emit(MarketResolvedEvent<Collateral> {
         market_id,
         outcome,
         finalized: true,
@@ -394,8 +437,8 @@ public(package) fun transition_to_resolved(market: &mut PMMarket) {
 
 /// Transition to INVALID — allowed from OPEN, CLOSED, RESOLUTION_PENDING, or DISPUTED.
 /// NOT allowed from RESOLVED (terminal state).
-public(package) fun transition_to_invalid(
-    market: &mut PMMarket,
+public(package) fun transition_to_invalid<Collateral>(
+    market: &mut PMMarket<Collateral>,
     reason: u8,
 ) {
     assert!(market.state != pm_rules::state_resolved(), EResolvedIsTerminal);
@@ -405,16 +448,16 @@ public(package) fun transition_to_invalid(
     market.invalidation_snapshot_collateral = option::some(balance::value(&market.total_collateral));
     market.state = pm_rules::state_invalid();
 
-    event::emit(MarketInvalidatedEvent {
+    event::emit(MarketInvalidatedEvent<Collateral> {
         market_id: object::id(market),
         reason,
     });
 }
 
 /// Admin pre-trade invalidation only.
-public fun admin_invalidate_pre_trade(
-    market: &mut PMMarket,
-    _admin: &PMAdminCap,
+public fun admin_invalidate_pre_trade<Collateral>(
+    market: &mut PMMarket<Collateral>,
+    _admin: &PMAdminCap<Collateral>,
     reason: u8,
     ctx: &mut TxContext,
 ) {
@@ -433,7 +476,7 @@ public fun admin_invalidate_pre_trade(
         balance::destroy_zero(creator_bond);
     };
 
-    event::emit(MarketInvalidatedEvent {
+    event::emit(MarketInvalidatedEvent<Collateral> {
         market_id: object::id(market),
         reason,
     });
@@ -448,119 +491,141 @@ public fun admin_invalidate_pre_trade(
 /// 3. Call emergency_unpause() via PMAdminCap
 /// 4. Verify market state is consistent via check_invariants()
 /// Note: Terminal states (RESOLVED, INVALID) cannot be unpaused.
-public(package) fun emergency_pause(market: &mut PMMarket, paused_by: address) {
+public(package) fun emergency_pause<Collateral>(market: &mut PMMarket<Collateral>, paused_by: address) {
     market.emergency_paused = true;
-    event::emit(EmergencyPauseEvent {
+    event::emit(EmergencyPauseEvent<Collateral> {
         market_id: object::id(market),
         paused_by,
     });
 }
 
-public(package) fun emergency_unpause(market: &mut PMMarket) {
+public(package) fun emergency_unpause<Collateral>(market: &mut PMMarket<Collateral>) {
     assert!(
         market.state != pm_rules::state_resolved() && market.state != pm_rules::state_invalid(),
         ECannotUnpauseTerminal,
     );
     market.emergency_paused = false;
-    event::emit(EmergencyUnpauseEvent { market_id: object::id(market) });
+    event::emit(EmergencyUnpauseEvent<Collateral> { market_id: object::id(market) });
 }
 
 // ── Pool operations (called by trading module) ──
 
-public(package) fun add_outcome_quantity(market: &mut PMMarket, outcome_index: u16, amount: u64) {
+public(package) fun add_outcome_quantity<Collateral>(market: &mut PMMarket<Collateral>, outcome_index: u16, amount: u64) {
     assert!((outcome_index as u64) < vector::length(&market.outcome_quantities), EInvalidOutcomeIndex);
     let current = vector::borrow_mut(&mut market.outcome_quantities, outcome_index as u64);
     *current = *current + amount;
 }
 
-public(package) fun sub_outcome_quantity(market: &mut PMMarket, outcome_index: u16, amount: u64) {
+public(package) fun sub_outcome_quantity<Collateral>(market: &mut PMMarket<Collateral>, outcome_index: u16, amount: u64) {
     assert!((outcome_index as u64) < vector::length(&market.outcome_quantities), EInvalidOutcomeIndex);
     let current = vector::borrow_mut(&mut market.outcome_quantities, outcome_index as u64);
     *current = *current - amount;
 }
 
-public(package) fun deposit_collateral(market: &mut PMMarket, collateral: Balance<SUFFER>) {
+public(package) fun deposit_collateral<Collateral>(market: &mut PMMarket<Collateral>, collateral: Balance<Collateral>) {
     balance::join(&mut market.total_collateral, collateral);
 }
 
-public(package) fun withdraw_collateral(market: &mut PMMarket, amount: u64): Balance<SUFFER> {
+public(package) fun withdraw_collateral<Collateral>(market: &mut PMMarket<Collateral>, amount: u64): Balance<Collateral> {
     balance::split(&mut market.total_collateral, amount)
 }
 
-public(package) fun accrue_fee(market: &mut PMMarket, fee: Balance<SUFFER>) {
+public(package) fun accrue_fee<Collateral>(market: &mut PMMarket<Collateral>, fee: Balance<Collateral>) {
     balance::join(&mut market.accrued_fees, fee);
 }
 
 /// Sweep all accrued fees out of market (for treasury deposit).
-public(package) fun sweep_accrued_fees(market: &mut PMMarket): Balance<SUFFER> {
+public(package) fun sweep_accrued_fees<Collateral>(market: &mut PMMarket<Collateral>): Balance<Collateral> {
     let amount = balance::value(&market.accrued_fees);
     balance::split(&mut market.accrued_fees, amount)
 }
 
 /// Take the creation bond out of the market (for return or forfeiture).
-public(package) fun take_creation_bond(market: &mut PMMarket): Balance<SUFFER> {
+public(package) fun take_creation_bond<Collateral>(market: &mut PMMarket<Collateral>): Balance<Collateral> {
     let amount = balance::value(&market.creation_bond);
     balance::split(&mut market.creation_bond, amount)
 }
 
-/// Deposit community resolution bond (called during propose_community_resolution).
-public(package) fun deposit_community_resolution_bond(
-    market: &mut PMMarket,
-    bond: Balance<SUFFER>,
-    proposer: address,
+public(package) fun restore_creation_bond<Collateral>(
+    market: &mut PMMarket<Collateral>,
+    bond: Balance<Collateral>,
 ) {
-    market.community_resolution_bond = option::some(bond);
-    market.community_resolution_proposer = option::some(proposer);
+    balance::join(&mut market.creation_bond, bond);
 }
 
-/// Take the community resolution bond out of the market (for return or distribution).
-public(package) fun take_community_resolution_bond(market: &mut PMMarket): Balance<SUFFER> {
+/// Deposit community resolution bond (called during propose_community_resolution).
+public(package) fun deposit_community_resolution_bond<Collateral>(
+    market: &mut PMMarket<Collateral>,
+    bond: Balance<Collateral>,
+    proposer: address,
+) {
+    option::fill(&mut market.community_resolution_bond, bond);
+    option::fill(&mut market.community_resolution_proposer, proposer);
+}
+
+public(package) fun has_community_resolution_bond<Collateral>(market: &PMMarket<Collateral>): bool {
+    option::is_some(&market.community_resolution_bond)
+}
+
+/// Take the community resolution bond + proposer together so terminal paths cannot strand one side.
+public(package) fun take_community_resolution_context<Collateral>(
+    market: &mut PMMarket<Collateral>,
+): (Balance<Collateral>, address) {
     let bond = option::extract(&mut market.community_resolution_bond);
-    bond
+    let proposer = option::extract(&mut market.community_resolution_proposer);
+    (bond, proposer)
 }
 
 /// Get the community resolution proposer address (if any).
-public fun community_resolution_proposer(market: &PMMarket): Option<address> {
+public fun community_resolution_proposer<Collateral>(market: &PMMarket<Collateral>): Option<address> {
     market.community_resolution_proposer
 }
 
-public(package) fun add_cost_basis(market: &mut PMMarket, amount: u64) {
+public(package) fun add_cost_basis<Collateral>(market: &mut PMMarket<Collateral>, amount: u64) {
     market.total_cost_basis_sum = market.total_cost_basis_sum + amount;
 }
 
-public(package) fun sub_cost_basis(market: &mut PMMarket, amount: u64) {
+public(package) fun sub_cost_basis<Collateral>(market: &mut PMMarket<Collateral>, amount: u64) {
     market.total_cost_basis_sum = market.total_cost_basis_sum - amount;
 }
 
 // ── Read accessors ──
 
-public fun market_id(market: &PMMarket): ID { object::id(market) }
-public fun creator(market: &PMMarket): address { market.creator }
-public fun title(market: &PMMarket): &String { &market.title }
-public fun state(market: &PMMarket): u8 { market.state }
-public fun is_frozen(market: &PMMarket): bool { market.frozen }
-public fun market_type(market: &PMMarket): u8 { market.market_type }
-public fun resolution_class(market: &PMMarket): u8 { market.resolution_class }
-public fun trust_tier(market: &PMMarket): u8 { market.trust_tier }
-public fun outcome_count(market: &PMMarket): u16 { market.outcome_count }
-public fun close_time_ms(market: &PMMarket): u64 { market.close_time_ms }
-public fun resolve_deadline_ms(market: &PMMarket): u64 { market.resolve_deadline_ms }
-public fun dispute_window_ms(market: &PMMarket): u64 { market.dispute_window_ms }
-public fun outcome_quantities(market: &PMMarket): &vector<u64> { &market.outcome_quantities }
-public fun total_collateral(market: &PMMarket): u64 { balance::value(&market.total_collateral) }
-public fun accrued_fees(market: &PMMarket): u64 { balance::value(&market.accrued_fees) }
-public fun total_cost_basis_sum(market: &PMMarket): u64 { market.total_cost_basis_sum }
-public fun is_emergency_paused(market: &PMMarket): bool { market.emergency_paused }
-public fun market_type_policy_id(market: &PMMarket): ID { market.market_type_policy_id }
-public fun resolver_policy_id(market: &PMMarket): ID { market.resolver_policy_id }
-public fun config_version(market: &PMMarket): u64 { market.config_version }
-public fun created_at_ms(market: &PMMarket): u64 { market.created_at_ms }
+public fun market_id<Collateral>(market: &PMMarket<Collateral>): ID { object::id(market) }
+public fun creator<Collateral>(market: &PMMarket<Collateral>): address { market.creator }
+public fun title<Collateral>(market: &PMMarket<Collateral>): &String { &market.title }
+public fun state<Collateral>(market: &PMMarket<Collateral>): u8 { market.state }
+public fun is_frozen<Collateral>(market: &PMMarket<Collateral>): bool { market.frozen }
+public fun market_type<Collateral>(market: &PMMarket<Collateral>): u8 { market.market_type }
+public fun resolution_class<Collateral>(market: &PMMarket<Collateral>): u8 { market.resolution_class }
+public fun trust_tier<Collateral>(market: &PMMarket<Collateral>): u8 { market.trust_tier }
+public fun outcome_count<Collateral>(market: &PMMarket<Collateral>): u16 { market.outcome_count }
+public fun close_time_ms<Collateral>(market: &PMMarket<Collateral>): u64 { market.close_time_ms }
+public fun resolve_deadline_ms<Collateral>(market: &PMMarket<Collateral>): u64 { market.resolve_deadline_ms }
+public fun dispute_window_ms<Collateral>(market: &PMMarket<Collateral>): u64 { market.dispute_window_ms }
+public fun outcome_quantities<Collateral>(market: &PMMarket<Collateral>): &vector<u64> { &market.outcome_quantities }
+public fun total_collateral<Collateral>(market: &PMMarket<Collateral>): u64 { balance::value(&market.total_collateral) }
+public fun accrued_fees<Collateral>(market: &PMMarket<Collateral>): u64 { balance::value(&market.accrued_fees) }
+public fun total_cost_basis_sum<Collateral>(market: &PMMarket<Collateral>): u64 { market.total_cost_basis_sum }
+public fun creation_bond_amount<Collateral>(market: &PMMarket<Collateral>): u64 { balance::value(&market.creation_bond) }
+public fun community_resolution_bond_amount<Collateral>(market: &PMMarket<Collateral>): u64 {
+    if (option::is_some(&market.community_resolution_bond)) {
+        balance::value(option::borrow(&market.community_resolution_bond))
+    } else {
+        0
+    }
+}
+public fun is_emergency_paused<Collateral>(market: &PMMarket<Collateral>): bool { market.emergency_paused }
+public fun market_type_policy_id<Collateral>(market: &PMMarket<Collateral>): ID { market.market_type_policy_id }
+public fun resolver_policy_id<Collateral>(market: &PMMarket<Collateral>): ID { market.resolver_policy_id }
+public fun config_version<Collateral>(market: &PMMarket<Collateral>): u64 { market.config_version }
+public fun created_at_ms<Collateral>(market: &PMMarket<Collateral>): u64 { market.created_at_ms }
 
-public fun resolution(market: &PMMarket): &Option<PMResolutionRecord> { &market.resolution }
-public fun invalidation_snapshot_collateral(market: &PMMarket): Option<u64> { market.invalidation_snapshot_collateral }
+public fun resolution<Collateral>(market: &PMMarket<Collateral>): &Option<PMResolutionRecord> { &market.resolution }
+public fun invalidation_snapshot_collateral<Collateral>(market: &PMMarket<Collateral>): Option<u64> { market.invalidation_snapshot_collateral }
 
-public fun source_declaration(market: &PMMarket): &SourceDeclaration { &market.source_declaration }
-public fun creator_influence(market: &PMMarket): &CreatorInfluence { &market.creator_influence }
+public fun source_declaration<Collateral>(market: &PMMarket<Collateral>): &SourceDeclaration { &market.source_declaration }
+public fun creator_influence<Collateral>(market: &PMMarket<Collateral>): &CreatorInfluence { &market.creator_influence }
 
 // Resolution record accessors
 public fun resolution_outcome(record: &PMResolutionRecord): u16 { record.resolved_outcome }
@@ -574,15 +639,15 @@ public fun is_source_controller(ci: &CreatorInfluence): bool { ci.creator_is_sou
 
 // ── Assertions ──
 
-public fun assert_open(market: &PMMarket) {
+public fun assert_open<Collateral>(market: &PMMarket<Collateral>) {
     assert!(market.state == pm_rules::state_open(), EMarketNotOpen);
 }
 
-public fun assert_not_emergency_paused(market: &PMMarket) {
+public fun assert_not_emergency_paused<Collateral>(market: &PMMarket<Collateral>) {
     assert!(!market.emergency_paused, ERegistryPaused);
 }
 
-public fun assert_creator(market: &PMMarket, ctx: &TxContext) {
+public fun assert_creator<Collateral>(market: &PMMarket<Collateral>, ctx: &TxContext) {
     assert!(market.creator == tx_context::sender(ctx), ENotCreator);
 }
 
@@ -602,7 +667,7 @@ public fun new_creator_influence(
 }
 
 /// Share a market object. Must be called from within this package.
-public(package) fun share_market(market: PMMarket) {
+public(package) fun share_market<Collateral>(market: PMMarket<Collateral>) {
     transfer::share_object(market);
 }
 
@@ -628,7 +693,7 @@ public fun new_resolution_record(
 /// RT-015: Read-only invariant check. Returns true if market state is internally consistent.
 /// Checks: pool reserves match outcome_count, collateral is non-negative,
 /// state is valid, and terminal states have appropriate resolution records.
-public fun check_invariants(market: &PMMarket): bool {
+public fun check_invariants<Collateral>(market: &PMMarket<Collateral>): bool {
     // Pool reserves count matches outcome_count
     if (vector::length(&market.outcome_quantities) != (market.outcome_count as u64)) {
         return false

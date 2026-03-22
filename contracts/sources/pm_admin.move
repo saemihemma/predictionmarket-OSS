@@ -25,19 +25,19 @@ const EPendingRequestExists: vector<u8> = b"A pending invalidation request alrea
 
 // ── Events ──
 
-public struct EmergencyAuthorityRotatedEvent has copy, drop {
+public struct EmergencyAuthorityRotatedEvent<phantom Collateral> has copy, drop {
     old_members: vector<address>,
     new_members: vector<address>,
     rotated_at_ms: u64,
 }
 
-public struct EmergencyInvalidationRequestedEvent has copy, drop {
+public struct EmergencyInvalidationRequestedEvent<phantom Collateral> has copy, drop {
     market_id: ID,
     requested_by: address,
     requested_at_ms: u64,
 }
 
-public struct EmergencyInvalidationEvent has copy, drop {
+public struct EmergencyInvalidationEvent<phantom Collateral> has copy, drop {
     market_id: ID,
     reason_code: u8,
     emergency_authority: address,
@@ -47,13 +47,13 @@ public struct EmergencyInvalidationEvent has copy, drop {
 
 /// Emergency capability — only this can invoke emergency pause/invalidation.
 /// PMAdminCap CANNOT invoke emergency actions.
-public struct PMEmergencyCap has key, store {
+public struct PMEmergencyCap<phantom Collateral> has key, store {
     id: UID,
 }
 
 /// Emergency multisig anchor — shared object with known ID.
 /// Holds the emergency cap and tracks authorized members.
-public struct PMEmergencyMultisig has key {
+public struct PMEmergencyMultisig<phantom Collateral> has key {
     id: UID,
     members: vector<address>,
     emergency_cap_id: ID,
@@ -64,16 +64,16 @@ public struct PMEmergencyMultisig has key {
 }
 
 /// Create the emergency infrastructure. Called once at deploy.
-public fun create_emergency_infra(
-    _admin: &PMAdminCap,
+public fun create_emergency_infra<Collateral>(
+    _admin: &PMAdminCap<Collateral>,
     members: vector<address>,
     review_window_ms: u64,
     ctx: &mut TxContext,
-): (PMEmergencyCap, PMEmergencyMultisig) {
-    let cap = PMEmergencyCap { id: object::new(ctx) };
+): (PMEmergencyCap<Collateral>, PMEmergencyMultisig<Collateral>) {
+    let cap = PMEmergencyCap<Collateral> { id: object::new(ctx) };
     let cap_id = object::id(&cap);
 
-    let multisig = PMEmergencyMultisig {
+    let multisig = PMEmergencyMultisig<Collateral> {
         id: object::new(ctx),
         members,
         emergency_cap_id: cap_id,
@@ -85,17 +85,30 @@ public fun create_emergency_infra(
     (cap, multisig)
 }
 
+/// Testnet/default bootstrap helper: the deployer becomes the sole emergency authority.
+/// Returns the emergency cap so the deployer can retain ownership after bootstrap.
+public fun create_and_share_default_emergency_infra<Collateral>(
+    admin: &PMAdminCap<Collateral>,
+    review_window_ms: u64,
+    ctx: &mut TxContext,
+): PMEmergencyCap<Collateral> {
+    let sender = tx_context::sender(ctx);
+    let (cap, multisig) = create_emergency_infra(admin, vector[sender], review_window_ms, ctx);
+    transfer::share_object(multisig);
+    cap
+}
+
 /// Rotate emergency multisig members.
-public fun rotate_emergency_members(
-    multisig: &mut PMEmergencyMultisig,
-    _cap: &PMEmergencyCap,
+public fun rotate_emergency_members<Collateral>(
+    multisig: &mut PMEmergencyMultisig<Collateral>,
+    _cap: &PMEmergencyCap<Collateral>,
     new_members: vector<address>,
     clock: &Clock,
 ) {
     let old_members = multisig.members;
     multisig.members = new_members;
 
-    event::emit(EmergencyAuthorityRotatedEvent {
+    event::emit(EmergencyAuthorityRotatedEvent<Collateral> {
         old_members,
         new_members: multisig.members,
         rotated_at_ms: sui::clock::timestamp_ms(clock),
@@ -105,18 +118,18 @@ public fun rotate_emergency_members(
 // ── Emergency pause (immediate, no review period) ──
 
 /// Emergency pause a market. Immediate — no review period required.
-public fun emergency_pause_market(
-    market: &mut PMMarket,
-    _cap: &PMEmergencyCap,
+public fun emergency_pause_market<Collateral>(
+    market: &mut PMMarket<Collateral>,
+    _cap: &PMEmergencyCap<Collateral>,
     ctx: &TxContext,
 ) {
     pm_market::emergency_pause(market, tx_context::sender(ctx));
 }
 
 /// Emergency unpause a market. Requires PMEmergencyCap.
-public fun emergency_unpause_market(
-    market: &mut PMMarket,
-    _cap: &PMEmergencyCap,
+public fun emergency_unpause_market<Collateral>(
+    market: &mut PMMarket<Collateral>,
+    _cap: &PMEmergencyCap<Collateral>,
 ) {
     pm_market::emergency_unpause(market);
 }
@@ -125,10 +138,10 @@ public fun emergency_unpause_market(
 
 /// Request emergency invalidation. Starts review window.
 /// The actual invalidation happens after the review window via `execute_emergency_invalidation`.
-public fun request_emergency_invalidation(
-    multisig: &mut PMEmergencyMultisig,
-    _cap: &PMEmergencyCap,
-    market: &PMMarket,
+public fun request_emergency_invalidation<Collateral>(
+    multisig: &mut PMEmergencyMultisig<Collateral>,
+    _cap: &PMEmergencyCap<Collateral>,
+    market: &PMMarket<Collateral>,
     clock: &Clock,
     ctx: &TxContext,
 ) {
@@ -139,7 +152,7 @@ public fun request_emergency_invalidation(
     multisig.pending_invalidation_market = option::some(market_id);
     multisig.pending_invalidation_requested_at_ms = option::some(requested_at_ms);
 
-    event::emit(EmergencyInvalidationRequestedEvent {
+    event::emit(EmergencyInvalidationRequestedEvent<Collateral> {
         market_id,
         requested_by: tx_context::sender(ctx),
         requested_at_ms,
@@ -147,11 +160,11 @@ public fun request_emergency_invalidation(
 }
 
 /// Execute emergency invalidation after review window passes.
-public fun execute_emergency_invalidation(
-    multisig: &mut PMEmergencyMultisig,
-    _cap: &PMEmergencyCap,
-    market: &mut PMMarket,
-    treasury: &mut PMTreasury,
+public fun execute_emergency_invalidation<Collateral>(
+    multisig: &mut PMEmergencyMultisig<Collateral>,
+    _cap: &PMEmergencyCap<Collateral>,
+    market: &mut PMMarket<Collateral>,
+    treasury: &mut PMTreasury<Collateral>,
     clock: &Clock,
     ctx: &TxContext,
 ) {
@@ -176,7 +189,7 @@ public fun execute_emergency_invalidation(
     multisig.pending_invalidation_market = option::none();
     multisig.pending_invalidation_requested_at_ms = option::none();
 
-    event::emit(EmergencyInvalidationEvent {
+    event::emit(EmergencyInvalidationEvent<Collateral> {
         market_id,
         reason_code: pm_rules::invalid_reason_emergency(),
         emergency_authority: tx_context::sender(ctx),
@@ -187,12 +200,12 @@ public fun execute_emergency_invalidation(
 
 /// Admin creates and shares a market (convenience wrapper).
 /// Markets can also be created directly via pm_market::create_market.
-public fun admin_create_market(
-    registry: &mut PMRegistry,
-    config: &PMConfig,
-    policy: &PMMarketTypePolicy,
-    resolver_policy: &PMResolverPolicy,
-    _admin: &PMAdminCap,
+public fun admin_create_market<Collateral>(
+    registry: &mut PMRegistry<Collateral>,
+    config: &PMConfig<Collateral>,
+    policy: &PMMarketTypePolicy<Collateral>,
+    resolver_policy: &PMResolverPolicy<Collateral>,
+    _admin: &PMAdminCap<Collateral>,
     title: String,
     description: String,
     resolution_text: String,
@@ -202,7 +215,7 @@ public fun admin_create_market(
     creator_influence: CreatorInfluence,
     close_time_ms: u64,
     resolve_deadline_ms: u64,
-    creation_bond: sui::balance::Balance<prediction_market::suffer::SUFFER>,
+    creation_bond: sui::balance::Balance<Collateral>,
     clock: &sui::clock::Clock,
     ctx: &mut TxContext,
 ) {
@@ -228,9 +241,9 @@ public fun admin_create_market(
 }
 
 /// Admin withdraws fees from treasury.
-public fun admin_withdraw_treasury(
-    treasury: &mut PMTreasury,
-    admin: &PMAdminCap,
+public fun admin_withdraw_treasury<Collateral>(
+    treasury: &mut PMTreasury<Collateral>,
+    admin: &PMAdminCap<Collateral>,
     amount: u64,
     recipient: address,
     ctx: &mut TxContext,
@@ -240,22 +253,22 @@ public fun admin_withdraw_treasury(
 
 // ── Read accessors ──
 
-public fun emergency_multisig_members(m: &PMEmergencyMultisig): &vector<address> {
+public fun emergency_multisig_members<Collateral>(m: &PMEmergencyMultisig<Collateral>): &vector<address> {
     &m.members
 }
 
-public fun emergency_review_window_ms(m: &PMEmergencyMultisig): u64 {
+public fun emergency_review_window_ms<Collateral>(m: &PMEmergencyMultisig<Collateral>): u64 {
     m.review_window_ms
 }
 
-public fun has_pending_invalidation(m: &PMEmergencyMultisig): bool {
+public fun has_pending_invalidation<Collateral>(m: &PMEmergencyMultisig<Collateral>): bool {
     option::is_some(&m.pending_invalidation_market)
 }
 
 /// Cancel a pending emergency invalidation request. Requires PMEmergencyCap.
-public fun cancel_emergency_invalidation(
-    multisig: &mut PMEmergencyMultisig,
-    _cap: &PMEmergencyCap,
+public fun cancel_emergency_invalidation<Collateral>(
+    multisig: &mut PMEmergencyMultisig<Collateral>,
+    _cap: &PMEmergencyCap<Collateral>,
 ) {
     multisig.pending_invalidation_market = option::none();
     multisig.pending_invalidation_requested_at_ms = option::none();

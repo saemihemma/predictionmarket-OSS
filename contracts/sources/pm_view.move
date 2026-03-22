@@ -14,9 +14,9 @@ use prediction_market::{
 // ── Market views ──
 
 /// Get the current implied probability for an outcome in basis points (0-10000).
-public fun market_probability_bps(
-    market: &PMMarket,
-    config: &PMConfig,
+public fun market_probability_bps<Collateral>(
+    market: &PMMarket<Collateral>,
+    config: &PMConfig<Collateral>,
     outcome_index: u16,
 ): u64 {
     pm_math::outcome_probability_bps(
@@ -27,8 +27,8 @@ public fun market_probability_bps(
 }
 
 /// Check if a market is currently tradeable (OPEN + before close time + not paused).
-public fun is_tradeable(
-    market: &PMMarket,
+public fun is_tradeable<Collateral>(
+    market: &PMMarket<Collateral>,
     current_time_ms: u64,
 ): bool {
     pm_market::state(market) == pm_rules::state_open() &&
@@ -37,7 +37,7 @@ public fun is_tradeable(
 }
 
 /// Check if a market is claimable (RESOLVED + finalized).
-public fun is_claimable(market: &PMMarket): bool {
+public fun is_claimable<Collateral>(market: &PMMarket<Collateral>): bool {
     if (pm_market::state(market) != pm_rules::state_resolved()) {
         return false
     };
@@ -50,7 +50,7 @@ public fun is_claimable(market: &PMMarket): bool {
 }
 
 /// Check if a market is refundable (INVALID state).
-public fun is_refundable(market: &PMMarket): bool {
+public fun is_refundable<Collateral>(market: &PMMarket<Collateral>): bool {
     pm_market::state(market) == pm_rules::state_invalid()
 }
 
@@ -58,8 +58,8 @@ public fun is_refundable(market: &PMMarket): bool {
 // (winning_outcome() and is_winning_position() removed — see DEAD_CODE_CLEANUP_SUMMARY.md)
 
 /// Estimate the payout for a winning position (gross, before settlement fee).
-public fun estimate_claim_payout(
-    position: &PMPosition,
+public fun estimate_claim_payout<Collateral>(
+    position: &PMPosition<Collateral>,
 ): u64 {
     // In the placeholder 1:1 model, payout = quantity
     pm_position::quantity(position)
@@ -70,16 +70,16 @@ public fun estimate_claim_payout(
 // ── Protocol stats ──
 
 /// Get total markets created.
-public fun total_markets(registry: &PMRegistry): u64 {
+public fun total_markets<Collateral>(registry: &PMRegistry<Collateral>): u64 {
     pm_registry::total_markets(registry)
 }
 
 /// Get treasury balance.
-public fun treasury_balance(treasury: &PMTreasury): u64 {
+public fun treasury_balance<Collateral>(treasury: &PMTreasury<Collateral>): u64 {
     pm_treasury::balance(treasury)
 }
 
 /// Get total fees collected by treasury.
-public fun total_fees_collected(treasury: &PMTreasury): u64 {
+public fun total_fees_collected<Collateral>(treasury: &PMTreasury<Collateral>): u64 {
     pm_treasury::total_fees_collected(treasury)
 }
