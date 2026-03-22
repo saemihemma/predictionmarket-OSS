@@ -159,7 +159,7 @@ export function testCleanup(): void {
   limiter.recordRequest(dispute, sender2);
 
   let stats = limiter.getStats();
-  console.assert(stats.activDisputeBuckets >= 1, "Should have active dispute bucket");
+  console.assert(stats.activeDisputeBuckets >= 1, "Should have active dispute bucket");
 
   // Wait for window to expire
   setTimeout(() => {
@@ -167,7 +167,7 @@ export function testCleanup(): void {
 
     stats = limiter.getStats();
     console.assert(
-      stats.activDisputeBuckets === 0,
+      stats.activeDisputeBuckets === 0,
       "Expired dispute buckets should be cleaned"
     );
 

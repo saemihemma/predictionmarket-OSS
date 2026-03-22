@@ -1,40 +1,62 @@
 # Phase Bot
 
-Automates SDVM voting phase transitions. When a dispute's commit, reveal, or tally deadline passes, the bot submits the on-chain transaction to advance the phase.
+Automates SDVM phase progression for the active collateral family.
 
-## How It Works
+## What It Does
 
-On startup the bot bootstraps from chain by querying `RoundCreatedEvent` events to discover active vote rounds. It schedules timers for each phase deadline (with a 30s safety buffer), and falls back to polling if timers miss. Retries use exponential backoff (1s → 4s → 16s).
+The bot discovers `SDVMVoteRoundCreatedEvent<Collateral>` events, loads each live round object, and advances rounds when deadlines expire:
 
-Phase flow: `COMMIT → REVEAL → TALLY → SETTLED`
+- `COMMIT` -> `advance_to_reveal_phase`
+- `REVEAL` -> `advance_to_tally_phase`
+- `TALLY` -> `tally_votes(round, stakingPool, clock)`
 
-## Setup
+After tally it refetches state so rolled rounds and settled rounds are not confused.
+
+## Configuration Sources
+
+The bot is env-first in deployed environments. It can read from:
+
+- explicit env overrides
+- `PM_MANIFEST_PATH` pointing at `deployments/testnet.json` for local development only
+
+Required effective values:
+
+- `SUI_RPC_URL`
+- `BOT_KEYPAIR`
+- `PM_PACKAGE_ID`
+- `PM_COLLATERAL_COIN_TYPE`
+- `PM_STAKING_POOL_ID`
+
+In deployed environments, these values must be set explicitly and the bot fails closed if they are missing.
+
+## Routes
+
+- `GET /health`
+- `GET /live`
+- `GET /ready`
+
+## Development
 
 ```bash
 cp .env.example .env
-# Fill in BOT_KEYPAIR and PM_PACKAGE_ID
 npm install
 npm run dev
 ```
 
-## Configuration
-
-See `.env.example` for all options. Required:
-
-- `BOT_KEYPAIR` — base64-encoded Sui keypair (needs gas for transition txs)
-- `PM_PACKAGE_ID` — deployed prediction market package ID
-
-Optional: `POLL_INTERVAL_MS` (default 60s), `HEALTH_PORT` (default 3000), `LOG_LEVEL` (default info).
-
-## Endpoints
-
-- `GET /health` — bot status, active rounds, last transition
-- `GET /live` — liveness probe
-- `GET /ready` — readiness probe
-
-## Docker
+## Build
 
 ```bash
-docker build -t phase-bot .
-docker run --env-file .env phase-bot
+npm run build
 ```
+
+## Tests
+
+```bash
+npm test
+```
+
+## Health Semantics
+
+- `/live` means the process is up
+- `/ready` means the bot finished startup and is actively polling
+- `/health` returns bot status details and should be used for operator diagnostics

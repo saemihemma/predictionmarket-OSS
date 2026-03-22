@@ -1,30 +1,101 @@
 # Gas Relay
 
-Sponsors transactions so users can interact with the prediction market without holding SUI for gas.
+Sponsors public-beta transactions so users can interact with the prediction market without holding testnet SUI.
 
-## How It Works
+## Public-Beta Scope
 
-Users submit signed transactions to the relay. The relay validates them against a whitelist of allowed Move modules (`pm_trading`, `pm_resolution`, `pm_dispute`, `pm_staking`, `pm_sdvm`), attaches a gas coin from a managed pool, co-signs, and submits to Sui.
+The relay is intended for user flows only:
 
-Validation is 5 layers deep: byte size check, BCS deserialization, package ID whitelist, command deny list (blocks admin functions), and per-sender rate limiting.
+- market creation
+- trade
+- claim
+- invalid refund
+- creator/community proposal
+- dispute filing
+- faucet claim
+- stake / unstake
+- commit / reveal voting
 
-## Setup
+It does not sponsor:
+
+- package publish or upgrade
+- admin actions
+- emergency actions
+- arbitrary object transfers
+- phase-bot maintenance calls
+
+## Validation Model
+
+Requests pass through:
+
+1. request size limits
+2. BCS transaction decoding
+3. package whitelist
+4. command deny list
+5. sender/dispute rate limiting
+
+Allowed PTB command plumbing includes:
+
+- `SplitCoins`
+- `MergeCoins`
+- `MakeMoveVec`
+
+Blocked PTB commands include:
+
+- `Publish`
+- `Upgrade`
+- arbitrary `TransferObjects`
+
+## Routes
+
+- `POST /v1/sponsor`
+- `POST /v1/execute`
+- `GET /health`
+
+## Required Configuration
+
+Copy `.env.example` to `.env` and set:
+
+- `SPONSOR_KEYPAIR`
+- `PM_PACKAGE_ID`
+
+Optional but recommended:
+
+- `SUI_RPC_URL`
+- `MAX_GAS_BUDGET`
+- `MIN_SPONSOR_BALANCE`
+- `LOW_BALANCE_THRESHOLD`
+- `DISPUTE_RATE_LIMIT`
+- `SENDER_RATE_LIMIT`
+- `ALLOWED_ORIGIN`
+- `API_KEY`
+
+## Development
 
 ```bash
 cp .env.example .env
-# Fill in SPONSOR_KEYPAIR_B64 and PM_PACKAGE_ID
 npm install
 npm run dev
 ```
 
-## Configuration
+## Build
 
-See `.env.example` for all options. Required:
+```bash
+npm run build
+```
 
-- `SPONSOR_KEYPAIR_B64` — base64-encoded Sui keypair (the gas sponsor)
-- `PM_PACKAGE_ID` — deployed prediction market package ID
+## Health Checks
 
-## Endpoints
+`GET /health` reports:
 
-- `POST /sponsor` — submit a transaction for gas sponsorship
-- `GET /health` — service health + sponsor balance
+- service status
+- sponsor balance
+- coin pool status
+
+`GET /health` returns `200` only when the sponsor wallet is healthy and the coin pool still has available gas coins. It returns `503` for degraded or not-ready sponsorship states.
+
+## Tests
+
+```bash
+npm test
+```

@@ -2,7 +2,7 @@ import { type Request, type Response } from "express";
 import { Transaction } from "@mysten/sui/transactions";
 import { suiClient, getSponsorKeypair, getSponsorAddress } from "../lib/sui-client.js";
 import { validateTransactionRequest } from "../lib/tx-validator.js";
-import { leaseCoin, returnCoin, hasActiveLease } from "../lib/coin-pool.js";
+import { leaseCoin, returnCoin, hasActiveLease, refreshCoinVersionFromChain } from "../lib/coin-pool.js";
 
 /**
  * POST /v1/sponsor
@@ -148,6 +148,13 @@ export async function executeRoute(req: Request, res: Response): Promise<void> {
     });
   } finally {
     // ALWAYS return the leased coin, success or failure
-    if (gasCoinId) returnCoin(gasCoinId);
+    if (gasCoinId) {
+      try {
+        await refreshCoinVersionFromChain(gasCoinId);
+      } catch (err) {
+        console.warn(`[gas-relay] failed to refresh gas coin ${gasCoinId}:`, err);
+      }
+      returnCoin(gasCoinId);
+    }
   }
 }

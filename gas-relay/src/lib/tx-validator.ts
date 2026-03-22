@@ -1,13 +1,8 @@
 /**
- * Validate that a transaction only targets the allowed prediction market package.
- * This prevents the relay from being used as a general-purpose gas sponsor.
+ * Transaction validator for the public-beta gas relay.
  *
- * Defense layers:
- * 1. Byte size + gas budget sanity checks
- * 2. Full BCS deserialization of TransactionKind
- * 3. Whitelist: every MoveCall must target PM_PACKAGE_ID
- * 4. Deny: no Publish, no Upgrade, no TransferObjects to non-sender
- * 5. Rate limiting: per-dispute and per-sender limits (Sprint D2)
+ * The relay only sponsors user-facing prediction-market flows. Admin, emergency,
+ * publish, upgrade, and arbitrary transfer operations stay unsponsored.
  */
 
 import { Transaction } from "@mysten/sui/transactions";
@@ -16,94 +11,86 @@ import { RateLimiter, extractDisputeRoundId } from "./rate-limiter.js";
 const PM_PACKAGE_ID = process.env.PM_PACKAGE_ID ?? "0x0";
 const MAX_GAS_BUDGET = parseInt(process.env.MAX_GAS_BUDGET ?? "50000000", 10);
 
-// Rate limiter instance (singleton) — start periodic cleanup to prevent memory growth
 const rateLimiter = new RateLimiter({
   disputeRateLimit: parseInt(process.env.DISPUTE_RATE_LIMIT ?? "100", 10),
   senderRateLimit: parseInt(process.env.SENDER_RATE_LIMIT ?? "20", 10),
-  windowMs: 3_600_000, // 1 hour
+  windowMs: 3_600_000,
 });
 rateLimiter.startPeriodicCleanup?.();
 
-// Whitelist of PM modules that can be called via sponsored relay.
-// pm_admin is intentionally EXCLUDED — emergency ops should not be sponsored.
-const ALLOWED_MODULES = new Set([
-  "pm_trading",
-  "pm_resolution",
-  "pm_dispute",
-  "pm_staking",    // Staking: stake, initiate_unstake, complete_unstake (NOT emergency_unstake)
-  "pm_sdvm",       // SDVM voting: commit_vote, reveal_vote, explicit_abstain
+const normalizeAddr = (addr: string) => `0x${addr.replace(/^0x/, "").replace(/^0+/, "") || "0"}`;
+
+const SPONSORED_CALLS = new Map<string, Set<string>>([
+  ["pm_market", new Set(["new_creator_influence", "create_and_share_market"])],
+  ["pm_source", new Set(["new", "deterministic_default"])],
+  [
+    "pm_trading",
+    new Set([
+      "buy",
+      "buy_merge",
+      "sell",
+      "claim",
+      "refund_invalid",
+      "close_market",
+      "sweep_fees",
+      "return_creator_bond",
+    ]),
+  ],
+  [
+    "pm_resolution",
+    new Set([
+      "propose_resolution",
+      "propose_community_resolution",
+      "finalize_resolution",
+      "invalidate_deadline_expired",
+    ]),
+  ],
+  [
+    "pm_dispute",
+    new Set([
+      "file_dispute",
+      "file_and_share_dispute",
+      "create_and_share_sdvm_vote_round",
+      "resolve_from_sdvm",
+      "try_resolve_dispute",
+      "timeout_dispute",
+      "close_dispute_on_invalid",
+    ]),
+  ],
+  ["pm_faucet", new Set(["claim"])],
+  ["pm_staking", new Set(["stake", "initiate_unstake", "complete_unstake", "clear_settled_dispute"])],
+  ["pm_sdvm", new Set(["commit_vote", "reveal_vote", "explicit_abstain", "claim_voter_reward", "cleanup_orphaned_commit"])],
 ]);
 
-/**
- * SPONSORED FUNCTIONS PER MODULE (gas relay covers costs):
- *
- * pm_trading:
- *   - create_market
- *   - place_bid
- *   - place_ask
- *   - cancel_bid / cancel_ask
- *
- * pm_resolution:
- *   - resolve_market (automated resolution)
- *
- * pm_dispute:
- *   - file_dispute
- *   - (dispute voting is now handled by pm_sdvm)
- *
- * pm_staking:
- *   - stake: User stakes SUFFER to become a voter
- *   - initiate_unstake: User initiates unstake cooldown (begins 48h countdown)
- *   - complete_unstake: User completes unstake after cooldown expires
- *   NOT SPONSORED: emergency_unstake (5% penalty) — user pays own gas for emergency operations
- *   NOT SPONSORED: admin functions — admin pays own gas for privileged operations
- *
- * pm_sdvm:
- *   - commit_vote: User commits vote hash + salt (vote is locked in)
- *   - reveal_vote: User reveals vote outcome + salt (hash verified, vote tallied)
- *   - explicit_abstain: User explicitly abstains (no slash, no reward, counts toward GAT)
- *   NOT SPONSORED: advance_to_reveal_phase (permissionless, called by bot/community)
- *   NOT SPONSORED: tally_votes (permissionless, caller earns 0.1% of slash pool)
- *   NOT SPONSORED: admin functions — admin pays own gas for emergency actions
- *
- * RATIONALE:
- * - Voting (pm_sdvm) is user-initiated and time-sensitive, justified for sponsorship
- * - Staking base operations (stake, unstake) are user-initiated participation, justified
- * - Phase transitions (advance_to_reveal, tally) are incentivized (bot earns rewards)
- *   and permissionless, so they should not be subsidized by relay
- * - Emergency operations and admin functions should never be subsidized
- */
+type CommandShape = {
+  $kind?: string;
+  MoveCall?: Record<string, unknown>;
+  Publish?: unknown;
+  Upgrade?: unknown;
+  TransferObjects?: unknown;
+  MakeMoveVec?: unknown;
+  SplitCoins?: unknown;
+  MergeCoins?: unknown;
+  package?: string;
+  module?: string;
+  function?: string;
+  target?: string;
+};
 
-/**
- * Per-dispute and per-market rate limiting:
- *
- * Per-dispute rate limiting is implemented in Layer 5 below (checkRateLimit on dispute_round_id).
- * Per-sender rate limiting also implemented (20 calls/hour per address).
- *
- * Per-MARKET limiting is deferred: at testnet scale, per-dispute limits (100/hour) combined with
- * per-sender limits (20/hour) provide sufficient protection. A single market at 500+ disputes/hour
- * would trigger the need for market-level quotas. Revisit if production shows market saturation.
- */
+type TxDataShape = {
+  commands?: CommandShape[];
+};
 
 export interface ValidationResult {
   valid: boolean;
   reason?: string;
 }
 
-/**
- * Validate transaction bytes before sponsoring.
- * Performs full deserialization, package whitelist check, and rate limiting.
- *
- * @param txKindBytes - Serialized transaction kind bytes
- * @param sender - Sui address of transaction sender
- * @param gasBudget - Optional gas budget (for sanity check)
- * @returns ValidationResult with valid flag and optional reason for rejection
- */
 export async function validateTransactionRequest(
   txKindBytes: string,
   sender: string,
   gasBudget?: number,
 ): Promise<ValidationResult> {
-  // ── Layer 1: Sanity checks ──
   if (gasBudget && gasBudget > MAX_GAS_BUDGET) {
     return { valid: false, reason: `Gas budget ${gasBudget} exceeds maximum ${MAX_GAS_BUDGET}` };
   }
@@ -116,22 +103,17 @@ export async function validateTransactionRequest(
     return { valid: false, reason: "Transaction bytes too large" };
   }
 
-  // ── Layer 2: Deserialize and inspect ──
-  let tx: Transaction;
-  let txData: Record<string, unknown>;
-
+  let txData: TxDataShape;
   try {
-    tx = Transaction.fromKind(txKindBytes);
-    // Build with a dummy sender to get the transaction data we can inspect
-    // We use getData() to inspect the commands without building
-    txData = tx.getData();
+    const tx = Transaction.fromKind(txKindBytes);
+    txData = tx.getData() as TxDataShape;
 
     if (!txData.commands || txData.commands.length === 0) {
       return { valid: false, reason: "Transaction has no commands" };
     }
 
-    if (txData.commands.length > 10) {
-      return { valid: false, reason: `Too many commands (${txData.commands.length}). Max 10.` };
+    if (txData.commands.length > 16) {
+      return { valid: false, reason: `Too many commands (${txData.commands.length}). Max 16.` };
     }
   } catch (err) {
     return {
@@ -140,64 +122,75 @@ export async function validateTransactionRequest(
     };
   }
 
-  // ── Layer 3: Whitelist MoveCall targets and extract dispute_round_id ──
   let disputeRoundId: string | undefined;
 
-  for (const command of txData.commands) {
+  for (const command of txData.commands ?? []) {
     if (command.$kind === "MoveCall" || command.MoveCall) {
-      const moveCall = command.MoveCall ?? command;
-      const target = moveCall.package ?? moveCall.target?.split("::")[0];
+      const moveCall = (command.MoveCall ?? command) as CommandShape;
+      const targetPackage = moveCall.package ?? moveCall.target?.split("::")[0];
       const module = moveCall.module ?? moveCall.target?.split("::")[1];
+      const fn = moveCall.function ?? moveCall.target?.split("::")[2];
 
-      // Normalize package ID (strip leading zeros after 0x)
-      const normalizeAddr = (addr: string) =>
-        "0x" + addr.replace(/^0x/, "").replace(/^0+/, "");
-
-      if (!target || normalizeAddr(target) !== normalizeAddr(PM_PACKAGE_ID)) {
+      if (!targetPackage || normalizeAddr(targetPackage) !== normalizeAddr(PM_PACKAGE_ID)) {
         return {
           valid: false,
-          reason: `MoveCall targets package ${target}, not allowed. Only ${PM_PACKAGE_ID} is permitted.`,
+          reason: `MoveCall targets package ${targetPackage}, not allowed. Only ${PM_PACKAGE_ID} is permitted.`,
         };
       }
 
       if (!module || module.trim() === "") {
-        return {
-          valid: false,
-          reason: "MoveCall has missing or empty module name",
-        };
+        return { valid: false, reason: "MoveCall has missing or empty module name" };
       }
-      if (!ALLOWED_MODULES.has(module)) {
+
+      const allowedFunctions = SPONSORED_CALLS.get(module);
+      if (!allowedFunctions) {
         return {
           valid: false,
-          reason: `MoveCall targets module ${module}, not allowed. Allowed: ${[...ALLOWED_MODULES].join(", ")}`,
+          reason: `MoveCall targets module ${module}, not allowed. Allowed: ${[...SPONSORED_CALLS.keys()].join(", ")}`,
         };
       }
 
-      // Try to extract dispute_round_id from pm_sdvm voting calls
-      if (module === "pm_sdvm" && !disputeRoundId) {
-        disputeRoundId = extractDisputeRoundId(txData, PM_PACKAGE_ID);
+      if (!fn || fn.trim() === "") {
+        return { valid: false, reason: "MoveCall has missing or empty function name" };
       }
+
+      if (!allowedFunctions.has(fn)) {
+        return {
+          valid: false,
+          reason: `MoveCall targets ${module}::${fn}, which is not sponsored for public beta.`,
+        };
+      }
+
+      if ((module === "pm_sdvm" || module === "pm_dispute") && !disputeRoundId) {
+        disputeRoundId = extractDisputeRoundId(txData as Record<string, unknown>, PM_PACKAGE_ID);
+      }
+      continue;
     }
 
-    // ── Layer 4: Deny dangerous command types ──
-    else if (command.$kind === "Publish" || command.Publish) {
+    if (command.$kind === "Publish" || command.Publish) {
       return { valid: false, reason: "Publish commands not allowed" };
-    } else if (command.$kind === "Upgrade" || command.Upgrade) {
-      return { valid: false, reason: "Upgrade commands not allowed" };
-    } else if (command.$kind === "TransferObjects" || command.TransferObjects) {
-      return { valid: false, reason: "TransferObjects commands not allowed in sponsored tx" };
-    } else if (command.$kind === "MakeMoveVec" || command.MakeMoveVec) {
-      // MakeMoveVec is ok — used in PTB composition
-    } else if (command.$kind === "SplitCoins" || command.SplitCoins) {
-      return { valid: false, reason: "SplitCoins commands not allowed in sponsored tx" };
-    } else if (command.$kind === "MergeCoins" || command.MergeCoins) {
-      return { valid: false, reason: "MergeCoins commands not allowed in sponsored tx" };
     }
-    // Allow: MoveCall (checked above), MakeMoveVec
+
+    if (command.$kind === "Upgrade" || command.Upgrade) {
+      return { valid: false, reason: "Upgrade commands not allowed" };
+    }
+
+    if (command.$kind === "TransferObjects" || command.TransferObjects) {
+      return { valid: false, reason: "TransferObjects commands not allowed in sponsored tx" };
+    }
+
+    if (
+      command.$kind === "MakeMoveVec" ||
+      command.MakeMoveVec ||
+      command.$kind === "SplitCoins" ||
+      command.SplitCoins ||
+      command.$kind === "MergeCoins" ||
+      command.MergeCoins
+    ) {
+      continue;
+    }
   }
 
-  // ── Layer 5: Rate limiting ──
-  // If this is a vote transaction, check per-dispute and per-sender limits
   if (disputeRoundId) {
     if (!rateLimiter.checkRateLimit(disputeRoundId, sender)) {
       const disputeCount = rateLimiter.getDisputeCount(disputeRoundId);
@@ -209,25 +202,22 @@ export async function validateTransactionRequest(
         reason:
           `Rate limit exceeded: dispute_round_id=${disputeRoundId} has ${disputeCount} calls ` +
           `(limit: 100/hr), sender=${sender} has ${senderCount} calls (limit: 20/hr). ` +
-          `Active disputes: ${stats.activDisputeBuckets}, active senders: ${stats.activeSenderBuckets}`,
+          `Active disputes: ${stats.activeDisputeBuckets}, active senders: ${stats.activeSenderBuckets}`,
       };
     }
 
-    // Record the successful rate limit check
     rateLimiter.recordRequest(disputeRoundId, sender);
-  } else {
-    // Non-vote transaction (e.g., pm_staking::stake) — only check sender limit
-    if (!rateLimiter.checkRateLimit("_global", sender)) {
-      const senderCount = rateLimiter.getSenderCount(sender);
-      return {
-        valid: false,
-        reason:
-          `Rate limit exceeded: sender=${sender} has ${senderCount} calls (limit: 20/hr)`,
-      };
-    }
-    rateLimiter.recordRequest("_global", sender);
+    return { valid: true };
   }
 
+  if (!rateLimiter.checkRateLimit("_global", sender)) {
+    const senderCount = rateLimiter.getSenderCount(sender);
+    return {
+      valid: false,
+      reason: `Rate limit exceeded: sender=${sender} has ${senderCount} calls (limit: 20/hr)`,
+    };
+  }
+
+  rateLimiter.recordRequest("_global", sender);
   return { valid: true };
 }
-

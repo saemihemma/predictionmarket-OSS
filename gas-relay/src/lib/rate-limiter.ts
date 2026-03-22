@@ -47,7 +47,7 @@ export class RateLimiter {
   private cleanupIntervalMs: number = 5 * 60 * 1000; // 5 minutes minimum between cleanups
   private cleanupFrequency: number = 100; // Run cleanup every 100 requests
   // RT3-CRIT-003 FIX: Add periodic cleanup timer for long-lived services
-  private cleanupTimer?: NodeJS.Timer;
+  private cleanupTimer?: NodeJS.Timeout;
 
   /**
    * Create a new RateLimiter instance.
@@ -148,7 +148,7 @@ export class RateLimiter {
    * Get rate limit statistics (for health/metrics).
    */
   public getStats(): {
-    activDisputeBuckets: number;
+    activeDisputeBuckets: number;
     activeSenderBuckets: number;
     disputeLimit: number;
     senderLimit: number;
@@ -171,7 +171,7 @@ export class RateLimiter {
     }
 
     return {
-      activDisputeBuckets: activeDisputes,
+      activeDisputeBuckets: activeDisputes,
       activeSenderBuckets: activeSenders,
       disputeLimit: this.disputeLimit,
       senderLimit: this.senderLimit,
@@ -265,12 +265,11 @@ export class RateLimiter {
 }
 
 /**
- * Extract dispute_round_id from transaction arguments.
+ * Extract a dispute-scoped object ID from transaction arguments.
  *
- * The dispute_round_id is the first input argument to voting functions:
- * - pm_sdvm::commit_vote(vote_round: &SDVMVoteRound, ...)
- * - pm_sdvm::reveal_vote(vote_round: &mut SDVMVoteRound, ...)
- * - pm_sdvm::explicit_abstain(vote_round: &SDVMVoteRound, ...)
+ * The relay uses this for per-dispute/per-round throttling:
+ * - pm_sdvm vote calls are keyed by the vote-round object
+ * - pm_dispute lifecycle calls are keyed by the dispute object
  *
  * @param txData - Transaction data structure (from Transaction.getData())
  * @param pmPackageId - Expected PM package ID
@@ -285,32 +284,30 @@ export function extractDisputeRoundId(
     return undefined;
   }
 
-  // RT3-CRIT-004 FIX: Track shared object creations for PTB result resolution
-  // Build map of shared object results (limited support - direct refs only)
-  const sharedObjectResults = new Map<number, string>();
-
   for (const command of commands) {
-    // Check if this is a MoveCall command
     if (command.$kind === "MoveCall" || command.MoveCall) {
-      const moveCall = command.MoveCall ?? command;
+      const moveCall = (command.MoveCall ?? command) as Record<string, unknown>;
       const target = moveCall.target as string | undefined;
-
-      // Check if target is in pm_sdvm module
-      if (!target || !target.includes("::pm_sdvm::")) {
+      if (!target) {
         continue;
       }
 
-      // Check if this is a voting function
-      const isvotingFn =
-        target.includes("::commit_vote") ||
-        target.includes("::reveal_vote") ||
-        target.includes("::explicit_abstain");
+      const isSdvmVoteFn =
+        target.includes(`${pmPackageId}::pm_sdvm::commit_vote`) ||
+        target.includes(`${pmPackageId}::pm_sdvm::reveal_vote`) ||
+        target.includes(`${pmPackageId}::pm_sdvm::explicit_abstain`);
 
-      if (!isvotingFn) {
+      const isDisputeScopedFn =
+        target.includes(`${pmPackageId}::pm_dispute::create_and_share_sdvm_vote_round`) ||
+        target.includes(`${pmPackageId}::pm_dispute::resolve_from_sdvm`) ||
+        target.includes(`${pmPackageId}::pm_dispute::try_resolve_dispute`) ||
+        target.includes(`${pmPackageId}::pm_dispute::timeout_dispute`) ||
+        target.includes(`${pmPackageId}::pm_dispute::close_dispute_on_invalid`);
+
+      if (!isSdvmVoteFn && !isDisputeScopedFn) {
         continue;
       }
 
-      // Extract first argument (vote_round object)
       const args = moveCall.arguments as Array<Record<string, unknown>>;
       if (!Array.isArray(args) || args.length === 0) {
         continue;
@@ -323,24 +320,15 @@ export function extractDisputeRoundId(
         "Object" in firstArg
       ) {
         const objectField = firstArg.Object;
-
-        // RT3-CRIT-004: Handle direct object reference (string)
         if (typeof objectField === "string") {
-          return objectField; // Direct ref: "0x123..."
+          return objectField;
         }
 
-        // RT3-CRIT-004: Handle PTB result reference (object with kind and index)
         if (typeof objectField === "object" && objectField !== null) {
           const resultRef = objectField as Record<string, unknown>;
           if (resultRef.kind === "Results" && typeof resultRef.index === "string") {
-            const resultIdx = parseInt(resultRef.index, 10);
-            if (sharedObjectResults.has(resultIdx)) {
-              // PTB result reference can be resolved if we tracked it
-              return sharedObjectResults.get(resultIdx);
-            }
-            // Cannot resolve PTB reference — log warning
             console.warn(
-              `[extractDisputeRoundId] PTB result reference (index=${resultIdx}) cannot be resolved. ` +
+              `[extractDisputeRoundId] PTB result reference (index=${resultRef.index}) cannot be resolved. ` +
               `Rate limiting will fall back to sender-only checks.`
             );
             return undefined;

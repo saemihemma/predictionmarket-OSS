@@ -10,6 +10,10 @@ dotenv.config();
 
 const app = express();
 const PORT = parseInt(process.env.PORT ?? "3001", 10);
+const IS_DEPLOYED_ENVIRONMENT =
+  process.env.NODE_ENV === "production" ||
+  Boolean(process.env.RAILWAY_PROJECT_ID) ||
+  Boolean(process.env.RAILWAY_ENVIRONMENT_NAME);
 
 app.use(cors({
   origin: process.env.ALLOWED_ORIGIN ?? "*",
@@ -77,12 +81,21 @@ app.post("/v1/execute", executeRoute);
 
 async function start() {
   // Validate required config
-  if (!process.env.SPONSOR_KEYPAIR_B64) {
-    console.error("[gas-relay] FATAL: SPONSOR_KEYPAIR_B64 not set");
+  if (!process.env.SPONSOR_KEYPAIR && !process.env.SPONSOR_KEYPAIR_B64) {
+    console.error("[gas-relay] FATAL: SPONSOR_KEYPAIR not set");
     process.exit(1);
   }
   if (!process.env.PM_PACKAGE_ID || process.env.PM_PACKAGE_ID === "0x0") {
-    console.warn("[gas-relay] WARNING: PM_PACKAGE_ID not set — tx validation will reject all calls");
+    console.error("[gas-relay] FATAL: PM_PACKAGE_ID not set");
+    process.exit(1);
+  }
+  if (IS_DEPLOYED_ENVIRONMENT && !process.env.SUI_RPC_URL) {
+    console.error("[gas-relay] FATAL: SUI_RPC_URL must be set in deployed environments");
+    process.exit(1);
+  }
+  if (IS_DEPLOYED_ENVIRONMENT && !process.env.ALLOWED_ORIGIN) {
+    console.error("[gas-relay] FATAL: ALLOWED_ORIGIN must be set in deployed environments");
+    process.exit(1);
   }
 
   // Initialize coin pool before accepting requests

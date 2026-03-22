@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "start": "node dist/server.js",
-    "build": "tsc"
+    "build": "tsc",
+    "test": "tsx --test test/**/*.test.ts"
   },
   "dependencies": {
     "@mysten/sui": "^2.0.0",

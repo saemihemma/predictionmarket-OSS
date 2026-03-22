@@ -6,6 +6,9 @@ node_modules/
 build/
 dist/
 .vercel/
+frontend/public/protocol-manifest.json
+frontend/.tsbuild-node/
+frontend/tsconfig.tsbuildinfo
 
 # Environment
 .env

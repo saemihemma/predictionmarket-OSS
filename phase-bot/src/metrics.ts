@@ -13,11 +13,6 @@
  */
 
 /**
- * Metric types as per Prometheus conventions.
- */
-type MetricType = "counter" | "gauge" | "histogram";
-
-/**
  * Single metric sample with labels.
  */
 interface MetricSample {

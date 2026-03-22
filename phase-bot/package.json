@@ -9,7 +9,7 @@
     "build": "tsc",
     "start": "node dist/server.js",
     "lint": "eslint src --ext .ts",
-    "test": "tsx test/**/*.test.ts"
+    "test": "tsx --test test/**/*.test.ts"
   },
   "dependencies": {
     "@mysten/sui": "^2.0.0",

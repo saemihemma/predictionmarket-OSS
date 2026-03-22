@@ -55,7 +55,7 @@ export async function initCoinPool(): Promise<void> {
     limit: 50,
   });
 
-  pool = coins.data.map((c) => ({
+  pool = (coins.data as Array<{ coinObjectId: string; version: string; digest: string }>).map((c): PoolEntry => ({
     coin: {
       objectId: c.coinObjectId,
       version: c.version,
@@ -92,8 +92,8 @@ async function refreshPool(): Promise<void> {
     limit: 50,
   });
 
-  const freshMap = new Map(
-    coins.data.map((c) => [
+  const freshMap = new Map<string, GasCoinRef>(
+    (coins.data as Array<{ coinObjectId: string; version: string; digest: string }>).map((c) => [
       c.coinObjectId,
       { objectId: c.coinObjectId, version: c.version, digest: c.digest },
     ]),
@@ -102,7 +102,7 @@ async function refreshPool(): Promise<void> {
   // Update versions for existing coins, mark removed coins as gone
   pool = pool
     .filter((entry) => freshMap.has(entry.coin.objectId) || entry.inUse)
-    .map((entry) => {
+    .map((entry): PoolEntry => {
       const fresh = freshMap.get(entry.coin.objectId);
       if (fresh && !entry.inUse) {
         return { ...entry, coin: fresh };
@@ -226,6 +226,23 @@ export function updateCoinVersion(
     entry.coin.version = newVersion;
     entry.coin.digest = newDigest;
   }
+}
+
+export async function refreshCoinVersionFromChain(objectId: string): Promise<void> {
+  const response = await suiClient.getObject({
+    id: objectId,
+    options: {
+      showType: true,
+      showOwner: true,
+    },
+  } as never);
+
+  const data = (response as { data?: { version?: string | number; digest?: string } }).data;
+  if (!data?.version || !data.digest) {
+    return;
+  }
+
+  updateCoinVersion(objectId, data.version.toString(), data.digest);
 }
 
 export function poolStats(): {
