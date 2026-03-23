@@ -1,153 +1,58 @@
 import TerminalScreen from "../components/terminal/TerminalScreen";
 import PageHeader from "../components/ui/PageHeader";
 import Footer from "../components/ui/Footer";
+import { COLLATERAL_NAME, COLLATERAL_SYMBOL } from "../lib/market-constants";
+
+const STEPS = [
+  {
+    title: "1. A MARKET RESOLVES",
+    body: "A market closes and resolves with an outcome. You disagree with the resolution.",
+  },
+  {
+    title: "2. YOU FILE A DISPUTE",
+    body: "Click the DISPUTE button on the market and post a bond (varies by market trust tier). The protocol dispute object is already live; the dedicated dispute UI is still coming online.",
+  },
+  {
+    title: "3. TOKENHOLDERS VOTE",
+    body: `${COLLATERAL_SYMBOL} token holders will vote on the correct outcome using commit-reveal voting. The on-chain objects are live; the dedicated vote, stake, and reward screens are not shipped yet.`,
+  },
+  {
+    title: "4. OUTCOME IS DETERMINED",
+    body: "If you are right: you get 75% of the creator's bond plus your bond back. If you are wrong: you lose 75% of your bond to the creator.",
+  },
+  {
+    title: "5. VOTES COMPLETE",
+    body: "Voting takes 24-48 hours to complete once the live protocol flow is active. Once finished, the new outcome is final.",
+  },
+] as const;
 
 export default function DisputeHelpPage() {
   return (
     <TerminalScreen>
-      <div className="min-h-[100dvh] flex flex-col">
+      <div className="min-h-screen flex flex-col">
         <PageHeader subtitle="DISPUTE HELP" showBack />
 
-        {/* Content */}
-        <main style={{ flex: 1, padding: "2rem", maxWidth: "900px", margin: "0 auto", width: "100%" }}>
-          <div
-            style={{
-              background: "var(--bg-panel)",
-              border: "1px solid var(--border-panel)",
-              padding: "2rem",
-            }}
-          >
-            <h2
-              style={{
-                fontSize: "1.4rem",
-                fontWeight: 700,
-                color: "var(--mint)",
-                marginBottom: "1.5rem",
-                letterSpacing: "0.1em",
-              }}
-            >
-              HOW DISPUTES WORK
-            </h2>
+        <main className="page-shell page-shell--narrow page-section flex-1">
+          <div className="border border-border-panel bg-bg-panel p-5 sm:p-8">
+            <h2 className="mb-6 text-[1.2rem] font-bold tracking-[0.1em] text-mint sm:text-[1.4rem]">HOW DISPUTES WORK</h2>
+            <p className="mb-6 text-sm leading-7 text-text-muted sm:text-base">
+              The dispute and protocol objects are live on-chain today. What is still missing is the dedicated stake, vote,
+              and reward UI, so this page describes the flow before that interface lands for {COLLATERAL_NAME}.
+            </p>
 
-            <div
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                gap: "1.5rem",
-                fontSize: "1rem",
-                color: "var(--text)",
-                lineHeight: "1.8",
-              }}
-            >
-              {/* Step 1 */}
-              <div>
-                <div
-                  style={{
-                    fontSize: "0.95rem",
-                    fontWeight: 600,
-                    color: "var(--mint)",
-                    marginBottom: "0.5rem",
-                    letterSpacing: "0.08em",
-                  }}
-                >
-                  1. A MARKET RESOLVES
-                </div>
-                <p style={{ margin: 0, color: "var(--text-muted)" }}>
-                  A market closes and resolves with an outcome. You disagree with the resolution.
-                </p>
-              </div>
+            <div className="flex flex-col gap-6 text-base leading-7 text-text">
+              {STEPS.map((step) => (
+                <section key={step.title}>
+                  <div className="mb-2 text-[0.95rem] font-semibold tracking-[0.08em] text-mint">{step.title}</div>
+                  <p className="m-0 text-sm leading-7 text-text-muted sm:text-base">{step.body}</p>
+                </section>
+              ))}
 
-              {/* Step 2 */}
-              <div>
-                <div
-                  style={{
-                    fontSize: "0.95rem",
-                    fontWeight: 600,
-                    color: "var(--mint)",
-                    marginBottom: "0.5rem",
-                    letterSpacing: "0.08em",
-                  }}
-                >
-                  2. YOU FILE A DISPUTE
-                </div>
-                <p style={{ margin: 0, color: "var(--text-muted)" }}>
-                  Click the DISPUTE button on the market and post a bond (varies by market trust tier).
-                  This escalates the resolution to the protocol.
-                </p>
-              </div>
-
-              {/* Step 3 */}
-              <div>
-                <div
-                  style={{
-                    fontSize: "0.95rem",
-                    fontWeight: 600,
-                    color: "var(--mint)",
-                    marginBottom: "0.5rem",
-                    letterSpacing: "0.08em",
-                  }}
-                >
-                  3. SUFFER TOKENHOLDERS VOTE
-                </div>
-                <p style={{ margin: 0, color: "var(--text-muted)" }}>
-                  SUFFER token holders vote on the correct outcome using commit-reveal voting.
-                  This is fully decentralized and on-chain.
-                </p>
-              </div>
-
-              {/* Step 4 */}
-              <div>
-                <div
-                  style={{
-                    fontSize: "0.95rem",
-                    fontWeight: 600,
-                    color: "var(--mint)",
-                    marginBottom: "0.5rem",
-                    letterSpacing: "0.08em",
-                  }}
-                >
-                  4. OUTCOME IS DETERMINED
-                </div>
-                <p style={{ margin: 0, color: "var(--text-muted)" }}>
-                  If you are right: you get 75% of the creator's bond + your bond back.
-                  <br />
-                  If you are wrong: you lose 75% of your bond to the creator.
-                </p>
-              </div>
-
-              {/* Step 5 */}
-              <div>
-                <div
-                  style={{
-                    fontSize: "0.95rem",
-                    fontWeight: 600,
-                    color: "var(--mint)",
-                    marginBottom: "0.5rem",
-                    letterSpacing: "0.08em",
-                  }}
-                >
-                  5. VOTES COMPLETE
-                </div>
-                <p style={{ margin: 0, color: "var(--text-muted)" }}>
-                  Voting takes 24-48 hours to complete. Once finished, the new outcome is final.
-                </p>
-              </div>
-
-              {/* Important note */}
-              <div
-                style={{
-                  padding: "1rem",
-                  background: "rgba(221, 122, 31, 0.08)",
-                  border: "1px solid var(--orange-dim)",
-                  marginTop: "1rem",
-                }}
-              >
-                <div style={{ fontSize: "0.9rem", color: "var(--orange)", fontWeight: 600, marginBottom: "0.5rem" }}>
-                  ⚠ NO APPEALS OR CUSTOMER SUPPORT
-                </div>
-                <p style={{ margin: 0, color: "var(--text-muted)", fontSize: "0.95rem" }}>
-                  This process is fully automated. The protocol is law. Once votes are tallied, the outcome is final.
-                  There is no customer support, no appeals, and no human judgment beyond the vote.
+              <div className="mt-2 border border-orange-dim bg-[rgba(221,122,31,0.08)] p-4">
+                <div className="mb-2 text-[0.9rem] font-semibold text-orange">WARNING // NO APPEALS OR CUSTOMER SUPPORT</div>
+                <p className="m-0 text-sm leading-7 text-text-muted sm:text-[0.95rem]">
+                  This process is fully automated. The protocol is law. Once votes are tallied, the outcome is final. There is
+                  no customer support, no appeals, and no human judgment beyond the vote.
                 </p>
               </div>
             </div>

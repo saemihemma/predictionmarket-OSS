@@ -1,5 +1,6 @@
 import { type ReactNode } from "react";
 import { motion } from "framer-motion";
+import { clsx } from "clsx";
 
 interface HeaderMeta {
   label: string;
@@ -10,21 +11,16 @@ interface TerminalHeaderProps {
   title: string;
   meta?: HeaderMeta[];
   status?: "ACTIVE" | "PAUSED" | "ENDED" | "STANDBY";
-  /** Optional right-side slot: e.g. back link, live badge */
   right?: ReactNode;
 }
 
-const statusColor: Record<string, string> = {
-  ACTIVE: "var(--mint)",
-  PAUSED: "var(--yellow)",
-  ENDED: "var(--text-dim)",
-  STANDBY: "var(--neutral-state)",
+const statusClasses: Record<string, string> = {
+  ACTIVE: "text-mint",
+  PAUSED: "text-yellow",
+  ENDED: "text-text-dim",
+  STANDBY: "text-neutral-state",
 };
 
-/**
- * Top metadata strip — market/event title, cycle/date labels, status indicator.
- * Applied once per route, inside TerminalScreen.
- */
 export default function TerminalHeader({
   title,
   meta = [],
@@ -36,97 +32,33 @@ export default function TerminalHeader({
       initial={{ opacity: 0, y: -6 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3, ease: "easeOut" }}
-      style={{
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "space-between",
-        flexWrap: "wrap",
-        gap: "0.5rem",
-        padding: "0.65rem 1.25rem",
-        borderBottom: "1px solid var(--border-panel)",
-        background: "rgba(6, 17, 12, 0.9)",
-        backdropFilter: "blur(2px)",
-        position: "sticky",
-        top: 0,
-        zIndex: 100,
-      }}
+      className="terminal-header sticky top-0 z-[100] border-b border-border-panel bg-[rgba(6,17,12,0.9)]"
     >
-      {/* Left: title + meta */}
-      <div style={{ display: "flex", alignItems: "center", gap: "1.5rem", flexWrap: "wrap" }}>
-        <h1
-          style={{
-            fontFamily: "IBM Plex Mono",
-            fontSize: "0.7rem",
-            fontWeight: 500,
-            letterSpacing: "0.14em",
-            lineHeight: 1,
-            color: "var(--mint)",
-            margin: 0,
-          }}
-        >
-          <span style={{ color: "var(--text-dim)" }}>// </span>
-          {title.toUpperCase()}
-        </h1>
+      <div className="page-shell flex flex-col gap-3 py-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-6 sm:gap-y-2">
+          <h1 className="m-0 font-mono text-[0.65rem] font-medium leading-none tracking-[0.14em] text-mint sm:text-[0.7rem]">
+            <span className="text-text-dim">// </span>
+            {title.toUpperCase()}
+          </h1>
 
-        {meta.map((m) => (
-          <div
-            key={m.label}
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "0.4rem",
-              fontFamily: "IBM Plex Mono",
-              fontSize: "0.65rem",
-            }}
-          >
-            <span style={{ color: "var(--text-dim)", letterSpacing: "0.1em" }}>
-              {m.label}
-            </span>
-            <span style={{ color: "var(--text-muted)" }}>{m.value}</span>
-          </div>
-        ))}
+          {meta.map((item) => (
+            <div key={item.label} className="flex items-center gap-2 font-mono text-[0.65rem]">
+              <span className="tracking-[0.1em] text-text-dim">{item.label}</span>
+              <span className="text-text-muted">{item.value}</span>
+            </div>
+          ))}
+        </div>
+
+        <div className="flex flex-wrap items-center gap-3 sm:justify-end">
+          {status && (
+            <div className={clsx("flex items-center gap-1.5 font-mono text-[0.65rem] tracking-[0.12em]", statusClasses[status])}>
+              <span className={clsx("terminal-status-dot", status === "ACTIVE" && "terminal-status-dot--active")} />
+              {status}
+            </div>
+          )}
+          {right}
+        </div>
       </div>
-
-      {/* Right slot */}
-      <div style={{ display: "flex", alignItems: "center", gap: "1rem" }}>
-        {status && (
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "0.35rem",
-              fontFamily: "IBM Plex Mono",
-              fontSize: "0.65rem",
-              letterSpacing: "0.12em",
-              color: statusColor[status] ?? "var(--text-muted)",
-            }}
-          >
-            <span
-              style={{
-                display: "inline-block",
-                width: 6,
-                height: 6,
-                borderRadius: "50%",
-                background: statusColor[status] ?? "var(--text-muted)",
-                boxShadow:
-                  status === "ACTIVE"
-                    ? "0 0 6px var(--mint)"
-                    : "none",
-                animation: status === "ACTIVE" ? "pulse 2s ease-in-out infinite" : "none",
-              }}
-            />
-            {status}
-          </div>
-        )}
-        {right}
-      </div>
-
-      <style>{`
-        @keyframes pulse {
-          0%, 100% { opacity: 1; }
-          50% { opacity: 0.4; }
-        }
-      `}</style>
     </motion.header>
   );
 }

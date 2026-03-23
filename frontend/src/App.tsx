@@ -7,6 +7,7 @@ const MarketCreatePage = lazy(() => import("./pages/MarketCreatePage"));
 const PortfolioPage = lazy(() => import("./pages/PortfolioPage"));
 const DisputeHelpPage = lazy(() => import("./pages/DisputeHelpPage"));
 const MarketDiagnosticsPage = lazy(() => import("./pages/MarketDiagnosticsPage"));
+const AirdropPage = lazy(() => import("./pages/AirdropPage"));
 
 function LoadingFallback() {
   return (
@@ -38,6 +39,7 @@ export default function App() {
           <Route path="/markets/create" element={<MarketCreatePage />} />
           <Route path="/markets/:id" element={<MarketDetailPage />} />
           <Route path="/portfolio" element={<PortfolioPage />} />
+          <Route path="/airdrop" element={<AirdropPage />} />
           <Route path="/disputes/help" element={<DisputeHelpPage />} />
           <Route path="/markets/diagnostics" element={<MarketDiagnosticsPage />} />
           <Route path="*" element={<Navigate to="/markets" replace />} />
