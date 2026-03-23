@@ -1,47 +1,31 @@
 import { COLLATERAL_SYMBOL } from "../../lib/market-constants";
-import { parseCollateralInput } from "../../lib/collateral";
-import { getCreationBondMinRawFromConfig, ProtocolRuntimeConfig } from "../../lib/protocol-runtime";
-import { TrustTier } from "../../lib/market-types";
 
 interface BondStepProps {
   trustTier: "sourceBackedCommunity" | "openCommunity";
   creationBond: string;
+  minimumCreationBond: string;
   resolutionBond: string;
-  runtimeConfig: ProtocolRuntimeConfig | null;
   onCreationBondChange: (value: string) => void;
 }
 
 export default function BondStep({
   trustTier,
   creationBond,
+  minimumCreationBond,
   resolutionBond,
-  runtimeConfig,
   onCreationBondChange,
 }: BondStepProps) {
-  const tierMap: Record<BondStepProps["trustTier"], TrustTier> = {
-    sourceBackedCommunity: TrustTier.CREATOR_RESOLVED,
-    openCommunity: TrustTier.EXPERIMENTAL,
-  };
-
-  const minCreationBondRaw = runtimeConfig
-    ? getCreationBondMinRawFromConfig(runtimeConfig, tierMap[trustTier])
-    : 0n;
-  const minimumCreationBond = Number(minCreationBondRaw) / 100;
-
   return (
     <>
       <div className="grid gap-6 md:grid-cols-2">
         <div>
           <label className="mb-2 block text-sm font-medium text-mint">Creation Bond ({COLLATERAL_SYMBOL})</label>
           <input
-            type="number"
+            type="text"
+            inputMode="decimal"
             value={creationBond}
-            onChange={(e) => {
-              const val = parseCollateralInput(e.target.value);
-              if (val >= minCreationBondRaw) {
-                onCreationBondChange(e.target.value);
-              }
-            }}
+            onChange={(event) => onCreationBondChange(event.target.value)}
+            placeholder={minimumCreationBond}
             className="touch-target min-h-11 w-full border border-border-panel bg-bg-terminal px-4 py-3 text-base text-text outline-none"
           />
           <div className="mt-1 text-xs text-text-muted">

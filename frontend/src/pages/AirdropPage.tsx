@@ -11,20 +11,20 @@ const STATUS_ITEMS = [
   { label: "NETWORK", value: "TESTNET", tone: "text-tribe-b" },
   { label: "TOKEN", value: "SFR", tone: "text-mint" },
   { label: "WALRUS ICON", value: "LIVE", tone: "text-mint" },
-  { label: "CLAIM PREVIEW", value: "LOCKED", tone: "text-orange" },
+  { label: "AIRDROP SITE", value: "OPEN", tone: "text-orange" },
 ] as const;
 
 const BRIEFING_ITEMS = [
-  "Wallet link is live through the shared terminal header.",
-  "The claim flow is staged as a preview and stays intentionally sealed for now.",
-  "SUFFER iconography is synced to the live Walrus-hosted identity.",
+  "Use the public airdrop site for the latest claim information.",
+  "Wallet connection is already available through the shared terminal header.",
+  "SUFFER branding stays synced to the live Walrus-hosted identity.",
 ] as const;
 
 const READINESS_ITEMS = [
   {
     label: "TOKEN",
     value: "SUFFER / SFR",
-    note: "Testnet presence is wired into the market identity and shown here as a locked preview.",
+    note: "Testnet presence is wired into the market identity and shown here as a live branded surface.",
   },
   {
     label: "ICON PATH",
@@ -33,8 +33,8 @@ const READINESS_ITEMS = [
   },
   {
     label: "CHANNEL",
-    value: "PREVIEW LOCKED",
-    note: "The surface is intentionally disabled until the claim experience is shipped.",
+    value: "PUBLIC SITE",
+    note: "Open the external airdrop website for the claim destination and updates.",
   },
 ] as const;
 
@@ -46,11 +46,11 @@ export default function AirdropPage() {
     <TerminalScreen>
       <div className="min-h-screen flex flex-col">
         <PageHeader
-          subtitle="SUFFER AIRDROP PREVIEW CHANNEL"
+          subtitle="SUFFER AIRDROP"
           showBack
           actions={
             <span className="touch-target inline-flex items-center border border-orange-dim bg-[rgba(221,122,31,0.08)] px-3 py-2 text-[0.65rem] font-semibold tracking-[0.16em] text-orange">
-              PREVIEW // LOCKED
+              PUBLIC SITE
             </span>
           }
         />
@@ -84,25 +84,25 @@ export default function AirdropPage() {
 
                 <div className="max-w-[42rem]">
                   <h2 className="m-0 text-[2rem] font-bold uppercase leading-[1.02] tracking-[0.12em] text-mint md:text-[3rem]">
-                    SUFFER PREVIEW IS LIVE.
+                    SUFFER AIRDROP IS LIVE.
                     <br />
-                    CLAIM CHANNEL LOCKED.
+                    OPEN THE PUBLIC SITE.
                   </h2>
                   <p className="mt-5 max-w-[36rem] text-sm leading-7 tracking-[0.06em] text-text-muted md:text-[0.95rem]">
-                    The airdrop surface is synced into THE ORCHESTRATOR as a locked preview. Wallet connection is active, token
-                    identity is in place, and the claim path is intentionally disabled until the dedicated experience ships.
+                    This internal page keeps the SUFFER identity and wallet context inside the app, while the public airdrop
+                    website carries the latest claim destination and updates.
                   </p>
                 </div>
 
                 <div className="mt-8 flex flex-wrap items-center gap-4">
-                  <button
-                    type="button"
-                    disabled
-                    aria-disabled="true"
-                    className="touch-target airdrop-disabled-channel border-2 border-orange bg-[rgba(221,122,31,0.08)] px-5 py-3 text-xs font-semibold uppercase tracking-[0.18em] text-orange shadow-[0_0_12px_rgba(221,122,31,0.22)] cursor-not-allowed"
+                  <a
+                    href="https://lineagewar.xyz/airdrop"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="touch-target inline-flex items-center justify-center border-2 border-orange bg-[rgba(221,122,31,0.08)] px-5 py-3 text-xs font-semibold uppercase tracking-[0.18em] text-orange shadow-[0_0_12px_rgba(221,122,31,0.22)] transition-all duration-200 hover:shadow-[0_0_16px_rgba(221,122,31,0.4)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange"
                   >
-                    PREVIEW LOCKED
-                  </button>
+                    OPEN AIRDROP WEBSITE
+                  </a>
                   <Link
                     to="/markets"
                     className="touch-target inline-flex items-center justify-center border border-border-panel px-4 py-3 text-center text-xs font-semibold tracking-[0.14em] text-mint no-underline transition-all duration-200 hover:border-mint hover:shadow-[0_0_12px_rgba(202,245,222,0.15)]"
@@ -112,7 +112,7 @@ export default function AirdropPage() {
                 </div>
 
                 <div className="mt-4 max-w-[38rem] text-[0.68rem] leading-6 tracking-[0.08em] text-text-dim">
-                  DISTRIBUTION STATUS // VISUAL PREVIEW LIVE // TRANSACTION PATH WITHHELD UNTIL THE CLAIM EXPERIENCE SHIPS.
+                  PUBLIC WEBSITE: lineagewar.xyz/airdrop // CLAIM DETAILS AND NEXT STEPS LIVE THERE.
                 </div>
               </div>
 
@@ -165,12 +165,12 @@ export default function AirdropPage() {
               <div className="mb-4 text-[0.58rem] tracking-[0.18em] text-text-dim">MISSION PROFILE</div>
               <div className="space-y-3 text-[0.82rem] leading-6 tracking-[0.06em] text-text-muted">
                 <p className="m-0">
-                  SUFFER enters the market as a branded signal layer, not a hidden utility coin. The airdrop page acts as the
-                  ignition surface: visual identity first, wallet awareness second, claim unlock later.
+                  SUFFER is the branded token surface for the market. This page gives the project a clear home inside the app
+                  while pointing people to the public airdrop website.
                 </p>
                 <p className="m-0">
-                  That means the page should feel more like a sealed terminal bay than a waiting room. It is already part of the
-                  product loop, just not yet open for claims.
+                  The shell stays consistent with the rest of the product, but the message should be easy to scan and simple to
+                  act on.
                 </p>
               </div>
             </div>
@@ -201,11 +201,11 @@ export default function AirdropPage() {
                   </span>
                 </div>
                 <div className="mt-4 break-all text-[0.88rem] tracking-[0.1em] text-text">
-                  {account ? account.address : "CONNECT THROUGH HEADER CONTROL"}
+                  {account ? account.address : "CONNECT THROUGH THE HEADER BUTTON"}
                 </div>
                 <div className="mt-4 text-[0.72rem] leading-5 tracking-[0.05em] text-text-dim">
-                  Wallet sync is already inherited from the live terminal header. No extra relay, no backend session, no
-                  airdrop middleware. When the claim surface ships, this page can take the next layer without being rebuilt.
+                  Wallet sync is already handled by the shared header. Open the public airdrop site when you want the latest
+                  claim information and next steps.
                 </div>
               </div>
             </div>

@@ -1,3 +1,5 @@
+import DateTimePicker from "./DateTimePicker";
+
 interface DatesStepProps {
   closeDate: string;
   onChange: (value: string) => void;
@@ -6,15 +8,11 @@ interface DatesStepProps {
 export default function DatesStep({ closeDate, onChange }: DatesStepProps) {
   return (
     <div>
-      <label className="block text-sm font-medium text-mint mb-2">
-        Market Close Date
-      </label>
-      <input
-        type="datetime-local"
-        value={closeDate}
-        onChange={(e) => onChange(e.target.value)}
-        className="w-full p-4 text-base bg-bg-terminal text-text border border-border-panel outline-none"
-      />
+      <label className="mb-2 block text-sm font-medium text-mint">Market Close Date</label>
+      <DateTimePicker value={closeDate} onChange={onChange} />
+      <div className="mt-2 text-xs text-text-muted">
+        Pick the date and time when trading should close. All times use your local browser time.
+      </div>
     </div>
   );
 }
