@@ -4,6 +4,8 @@ import { useCurrentAccount, useDAppKit, useWallets } from "@mysten/dapp-kit-reac
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import airdropFigure from "../assets/airdrop-figure.png";
+import eveVaultInstall from "../assets/eve-vault-install-mint.svg";
+import frontierWalletPanel from "../assets/frontier-wallet-panel-mint.svg";
 import sufferClaimMark from "../assets/suffer-claim-mark.png";
 import sufferCycleMint from "../assets/suffer-cycle-mint.svg";
 import TerminalScreen from "../components/terminal/TerminalScreen";
@@ -22,6 +24,8 @@ import { connectSelectedWallet } from "../lib/wallet-session";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const EXPLORER_BASE_URL = "https://testnet.suivision.xyz/txblock";
+const EVE_VAULT_RELEASES_URL = "https://github.com/evefrontier/evevault/releases";
+const EVE_VAULT_DOWNLOAD_URL = "https://github.com/evefrontier/evevault/releases/download/v0.0.6/eve-vault-chrome.zip";
 
 type ClaimStage = "idle" | "wallet" | "submitting";
 type ClaimMode =
@@ -192,7 +196,7 @@ function buildExplorerUrl(digest: string): string {
 function toFriendlyClaimError(error: unknown): string {
   if (error instanceof RelayApiError) {
     if (error.code === "frontier_character_required") {
-      return "Create your Frontier account and character first. This faucet only opens for wallets tied to a live Stillness character.";
+      return "This faucet only opens for the wallet tied to your Frontier rider. If you connected a different Sui wallet, copy your in-game address into EVE Vault first.";
     }
     if (error.code === "eligibility_unavailable") {
       return error.reason ?? "Frontier eligibility could not be verified right now. Please try again shortly.";
@@ -220,7 +224,7 @@ function toFriendlyClaimError(error: unknown): string {
     return "The faucet is empty right now. Please try again later.";
   }
   if (normalized.includes("frontier character required")) {
-    return "Create your Frontier account and character first. This faucet only opens for wallets tied to a live Stillness character.";
+    return "This faucet only opens for the wallet tied to your Frontier rider. If you connected a different Sui wallet, copy your in-game address into EVE Vault first.";
   }
   if (normalized.includes("eligibility unavailable")) {
     return "Frontier eligibility could not be verified right now. Please try again shortly.";
@@ -240,6 +244,7 @@ export default function AirdropPage() {
   const wallets = useWallets();
   const dAppKit = useDAppKit() as DAppKit;
   const claimDeckRef = useRef<HTMLElement | null>(null);
+  const connectGuideRef = useRef<HTMLDivElement | null>(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [walletPickerOpen, setWalletPickerOpen] = useState(false);
   const [connectingWalletName, setConnectingWalletName] = useState<string | null>(null);
@@ -272,12 +277,6 @@ export default function AirdropPage() {
     enabled: PM_FAUCET_ID !== "0x0",
     staleTime: 10_000,
     refetchInterval: 15_000,
-  });
-  const walletBalances = useQuery({
-    queryKey: ["wallet-balances", account?.address],
-    queryFn: () => protocolReadTransport.listWalletBalances(account!.address),
-    enabled: Boolean(account?.address),
-    staleTime: 30_000,
   });
 
   useEffect(() => {
@@ -322,23 +321,6 @@ export default function AirdropPage() {
   const canAffordClaim = faucet ? faucet.poolBalance >= claimAmount : false;
   const nextClaimCountdown = formatCountdown(nextResetMs - nowMs);
   const explorerUrl = successDigest ? buildExplorerUrl(successDigest) : null;
-  const canonicalWalletBalance = walletBalances.data?.find((entry) => entry.coinType === COLLATERAL_COIN_TYPE) ?? null;
-  const legacySufferVariants =
-    walletBalances.data?.filter(
-      (entry) => entry.coinType.endsWith("::suffer::SUFFER") && entry.coinType !== COLLATERAL_COIN_TYPE,
-    ) ?? [];
-  const canonicalBalanceLabel =
-    account && walletBalances.isLoading
-      ? "SYNCING"
-      : account
-        ? `${formatCollateralAmount(BigInt(canonicalWalletBalance?.totalBalance ?? "0"), { minimumFractionDigits: 2 })} ${COLLATERAL_SYMBOL}`
-        : "CONNECT WALLET";
-  const canonicalObjectCountLabel =
-    account && walletBalances.isLoading
-      ? "SYNCING"
-      : account
-        ? String(canonicalWalletBalance?.coinObjectCount ?? 0)
-        : "CONNECT WALLET";
   const claimAmountLabel = !account
     ? "TODAY'S CLAIM"
     : sameClaimAmountEachDay
@@ -406,6 +388,10 @@ export default function AirdropPage() {
     }
   }
 
+  function scrollToConnectGuide() {
+    connectGuideRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
   async function handleClaim() {
     if (!account || !faucet) {
       setClaimError("Connect your wallet before you claim.");
@@ -423,7 +409,7 @@ export default function AirdropPage() {
       const result = await executeSponsoredTx(tx);
       setSuccessDigest(result.digest);
       setSuccessAmount(claimAmount);
-      await Promise.all([refetchFaucet(), balance.refetch(), walletBalances.refetch()]);
+      await Promise.all([refetchFaucet(), balance.refetch()]);
     } catch (error) {
       console.error("Faucet claim failed:", error);
       setClaimError(toFriendlyClaimError(error));
@@ -537,10 +523,10 @@ export default function AirdropPage() {
         : "This faucet campaign has ended.";
     consoleToneClass = "text-orange";
   } else if (claimMode === "no_character") {
-    consoleHeadline = "FRONTIER CHARACTER REQUIRED.";
+    consoleHeadline = "FRONTIER RIDER WALLET REQUIRED.";
     consoleBody =
       faucetEligibility.data?.reason ??
-      "Create your Frontier account and character first. This faucet only opens for wallets tied to a live Stillness character.";
+      "This faucet only opens for the wallet tied to your Frontier rider. If you connected the wrong Sui wallet, follow the EVE Vault path below and try again.";
     consoleToneClass = "text-orange";
   } else if (claimMode === "paused") {
     consoleHeadline = "THE FAUCET IS TEMPORARILY PAUSED.";
@@ -565,6 +551,70 @@ export default function AirdropPage() {
     consoleHeadline = "CLAIM CONFIRMED.";
     consoleBody = "Your SFR has landed. Step back into the Orchestrator or open the transaction on the explorer.";
   }
+
+  const connectSteps = [
+    {
+      label: "01 // ENTER FRONTIER",
+      copy: "Log into Frontier and open the in-game wallet / currency panel.",
+      art: airdropFigure,
+      artAlt: "Rider of the Frontier",
+      artClassName: "w-20 sm:w-24",
+      shellClassName:
+        "border-border-panel bg-[radial-gradient(circle_at_top,rgba(202,245,222,0.08),rgba(2,5,3,0.2)_56%),rgba(2,5,3,0.58)]",
+      toneClassName: "text-text",
+    },
+    {
+      label: "02 // COPY ADDRESS + PIN",
+      copy: "Use the wallet tied to your Frontier rider. Copy the address and create your pin.",
+      art: frontierWalletPanel,
+      artAlt: "Stylized Frontier wallet address panel",
+      artClassName: "w-full max-w-[16rem]",
+      shellClassName:
+        "border-border-panel bg-[radial-gradient(circle_at_top,rgba(202,245,222,0.07),rgba(2,5,3,0.2)_56%),rgba(2,5,3,0.58)]",
+      toneClassName: "text-text",
+    },
+    {
+      label: "03 // LOAD EVE VAULT",
+      copy: "Install the Official EVE Vault Chrome Extension, then log in with the same Frontier email through Fusion Auth.",
+      art: eveVaultInstall,
+      artAlt: "EVE Vault install glyph",
+      artClassName: "w-28 sm:w-32",
+      shellClassName:
+        "border-border-panel bg-[radial-gradient(circle_at_top,rgba(202,245,222,0.08),rgba(2,5,3,0.2)_56%),rgba(2,5,3,0.58)]",
+      toneClassName: "text-text",
+      resourceLinks: [
+        { label: "RELEASES PAGE", href: EVE_VAULT_RELEASES_URL },
+        { label: "DOWNLOAD ZIP", href: EVE_VAULT_DOWNLOAD_URL },
+      ],
+      checklist: [
+        "Unzip it",
+        "Open chrome://extensions/",
+        "Turn on Developer Mode",
+        "Load unpacked",
+        "Log into EVE Vault with your Frontier email through Fusion Auth",
+      ],
+    },
+    {
+      label: "04 // CLAIM + ADD TOKEN",
+      copy: "Finish the claim here, sign in EVE Vault, then add the live SUFFER token.",
+      art: sufferClaimMark,
+      artAlt: "SUFFER claim mark",
+      artClassName: "w-24 sm:w-28",
+      shellClassName:
+        "border-orange-dim bg-[radial-gradient(circle_at_top,rgba(221,122,31,0.12),rgba(2,5,3,0.22)_56%),rgba(2,5,3,0.58)]",
+      toneClassName: "text-orange",
+      checklist: [
+        "Claim on this page",
+        "Sign the transaction in EVE Vault",
+        "Open your EVE Vault wallet",
+        "Click Add Token and paste the token ID below",
+      ],
+      utilityValue: COLLATERAL_COIN_TYPE,
+      utilityLabel: "COPY TOKEN ID",
+      utilityDisplay: truncateMiddle(COLLATERAL_COIN_TYPE, 18, 14),
+      closingLine: "5. ENJOY THE $SUFFER.",
+    },
+  ] as const;
 
   async function handleCopy(field: string, value: string) {
     try {
@@ -735,7 +785,7 @@ export default function AirdropPage() {
                       disabled={Boolean(connectingWalletName) || wallets.length === 0}
                       className="touch-target inline-flex min-h-12 items-center justify-center border-2 border-orange bg-[rgba(221,122,31,0.08)] px-5 py-3 text-xs font-semibold uppercase tracking-[0.18em] text-orange disabled:cursor-not-allowed disabled:opacity-40"
                     >
-                      {wallets.length === 0 ? "NO WALLET DETECTED" : connectingWalletName ? "CONNECTING..." : "CONNECT WALLET TO CLAIM"}
+                      {wallets.length === 0 ? "NO WALLET DETECTED" : connectingWalletName ? "CONNECTING..." : "CONNECT FRONTIER WALLET"}
                     </button>
                   ) : claimMode === "eligible" ? (
                     <button
@@ -746,13 +796,22 @@ export default function AirdropPage() {
                       CLAIM {formatClaimAmount(claimAmount)} {COLLATERAL_SYMBOL}
                     </button>
                   ) : claimMode === "no_character" ? (
-                    <button
-                      type="button"
-                      disabled
-                      className="touch-target inline-flex min-h-12 items-center justify-center border border-orange-dim bg-[rgba(221,122,31,0.08)] px-5 py-3 text-xs font-semibold uppercase tracking-[0.18em] text-orange/80 disabled:cursor-not-allowed"
-                    >
-                      FRONTIER CHARACTER REQUIRED
-                    </button>
+                    <>
+                      <button
+                        type="button"
+                        disabled
+                        className="touch-target inline-flex min-h-12 items-center justify-center border border-orange-dim bg-[rgba(221,122,31,0.08)] px-5 py-3 text-xs font-semibold uppercase tracking-[0.18em] text-orange/80 disabled:cursor-not-allowed"
+                      >
+                        FRONTIER RIDER WALLET REQUIRED
+                      </button>
+                      <button
+                        type="button"
+                        onClick={scrollToConnectGuide}
+                        className="touch-target inline-flex min-h-12 items-center justify-center border border-mint-dim bg-[rgba(202,245,222,0.08)] px-5 py-3 text-xs font-semibold uppercase tracking-[0.18em] text-mint transition-all duration-200 hover:bg-[rgba(202,245,222,0.14)]"
+                      >
+                        HOW TO CONNECT
+                      </button>
+                    </>
                   ) : claimMode === "cooldown" ? (
                     <button
                       type="button"
@@ -853,145 +912,94 @@ export default function AirdropPage() {
                 )}
               </div>
 
-              <div className="flex flex-col gap-4">
-                <div className="border border-border-panel bg-[rgba(2,5,3,0.5)] p-5">
-                  <div className="mb-4 text-[0.68rem] font-semibold tracking-[0.13em] text-text-muted">HOW IT WORKS</div>
-                  <div className="space-y-4 text-[0.8rem] leading-6 tracking-[0.05em] text-text-muted">
-                    <p className="m-0">
-                      This page is the claim gate. Choose a Sui-compatible wallet, press claim, and approve when your wallet asks.
-                    </p>
-                    <p className="m-0">
-                      The faucet reads its live payout from chain. It resets at 00:00 UTC and opens once per wallet each UTC day.
-                    </p>
-                    <p className="m-0">
-                      Wallet home screens can lag on custom testnet assets. The on-page balance and explorer transaction are the
-                      source of truth, and older SUFFER test tokens can still exist separately from the live one.
-                    </p>
+              <div ref={connectGuideRef} className="border border-border-panel bg-[rgba(2,5,3,0.5)] p-5 md:p-6">
+                <div className="mb-4 text-[0.68rem] font-semibold tracking-[0.13em] text-text-muted">HOW TO CONNECT</div>
+                <div className="max-w-[32rem] space-y-3">
+                  <div className="text-[0.88rem] font-semibold leading-6 tracking-[0.08em] text-mint">
+                    ONLY FOR THE WALLET TIED TO YOUR FRONTIER RIDER.
+                  </div>
+                  <div className="text-[0.82rem] leading-6 tracking-[0.05em] text-text-muted">
+                    If you connected the wrong Sui wallet, follow this path and return here to claim.
                   </div>
                 </div>
 
-                <div className="border border-border-panel bg-[rgba(2,5,3,0.5)] p-5">
-                  <div className="mb-4 flex items-center justify-between gap-3">
-                    <div className="text-[0.68rem] font-semibold tracking-[0.13em] text-text-muted">ON-CHAIN TRUTH</div>
-                    <Link
-                      to="/markets/diagnostics"
-                      className="text-[0.68rem] font-semibold tracking-[0.11em] text-mint no-underline"
+                <div className="mt-5 grid gap-4 md:grid-cols-2">
+                  {connectSteps.map((step, index) => (
+                    <div
+                      key={step.label}
+                      className={`flex h-full flex-col border bg-bg-panel p-4 ${
+                        index === 3 ? "border-orange-dim shadow-[0_0_14px_rgba(221,122,31,0.12)]" : "border-border-panel"
+                      }`}
                     >
-                      VIEW TRUST DETAILS
-                    </Link>
-                  </div>
-                  <div className="grid gap-3">
-                    <div className="border border-border-panel bg-bg-panel p-4">
-                      <div className="text-[0.67rem] font-semibold tracking-[0.13em] text-text-muted">NETWORK</div>
-                      <div className="mt-2 text-[0.95rem] font-semibold tracking-[0.08em] text-tribe-b">SUI TESTNET</div>
+                      <div className={`flex h-40 items-center justify-center border px-4 py-5 md:h-44 ${step.shellClassName}`}>
+                        <img src={step.art} alt={step.artAlt} className={`${step.artClassName} h-auto object-contain`} />
+                      </div>
+                      <div className={`mt-4 text-[0.74rem] font-semibold tracking-[0.13em] ${step.toneClassName}`}>{step.label}</div>
+                      <p className="mt-3 m-0 text-[0.82rem] leading-6 tracking-[0.05em] text-text-muted">{step.copy}</p>
+
+                      {"resourceLinks" in step && step.resourceLinks ? (
+                        <div className="mt-4 flex flex-wrap gap-2">
+                          {step.resourceLinks.map((resource) => (
+                            <a
+                              key={resource.href}
+                              href={resource.href}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center border border-border-panel px-3 py-2 text-[0.68rem] font-semibold tracking-[0.11em] text-mint no-underline transition-all duration-200 hover:bg-[rgba(202,245,222,0.08)]"
+                            >
+                              {resource.label}
+                            </a>
+                          ))}
+                        </div>
+                      ) : null}
+
+                      {"checklist" in step && step.checklist ? (
+                        <div className="mt-4 space-y-2 text-[0.74rem] leading-5 tracking-[0.05em] text-text-muted">
+                          {step.checklist.map((item, checklistIndex) => (
+                            <div key={item}>
+                              {checklistIndex + 1}. {item}
+                            </div>
+                          ))}
+                        </div>
+                      ) : null}
+
+                      {"utilityValue" in step && step.utilityValue ? (
+                        <div className="mt-4 border border-border-panel bg-[rgba(202,245,222,0.03)] p-3">
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="text-[0.66rem] font-semibold tracking-[0.12em] text-text-muted">TOKEN ID</div>
+                            <button
+                              type="button"
+                              onClick={() => void handleCopy("guideCoinType", step.utilityValue)}
+                              className="border border-border-panel px-2 py-1 text-[0.6rem] tracking-[0.1em] text-mint"
+                            >
+                              {copiedField === "guideCoinType" ? "COPIED" : step.utilityLabel}
+                            </button>
+                          </div>
+                          <div className="mt-2 break-all text-[0.76rem] leading-6 tracking-[0.05em] text-text">
+                            {step.utilityDisplay}
+                          </div>
+                        </div>
+                      ) : null}
+
+                      {"closingLine" in step && step.closingLine ? (
+                        <div className="mt-4 text-[0.73rem] font-semibold leading-5 tracking-[0.09em] text-orange">
+                          {step.closingLine}
+                        </div>
+                      ) : null}
                     </div>
-                    <div className="border border-border-panel bg-bg-panel p-4">
-                      <div className="flex items-center justify-between gap-3 text-[0.67rem] font-semibold tracking-[0.13em] text-text-muted">
-                        <span>CONNECTED WALLET</span>
-                        {account && (
-                          <button
-                            type="button"
-                            onClick={() => void handleCopy("wallet", account.address)}
-                            className="border border-border-panel px-2 py-1 text-[0.6rem] tracking-[0.1em] text-mint"
-                          >
-                            {copiedField === "wallet" ? "COPIED" : "COPY"}
-                          </button>
-                        )}
-                      </div>
-                      <div className="mt-2 break-all text-[0.82rem] leading-6 tracking-[0.05em] text-text">
-                        {account ? account.address : "CONNECT WALLET"}
-                      </div>
-                    </div>
-                    <div className="border border-border-panel bg-bg-panel p-4">
-                      <div className="flex items-center justify-between gap-3 text-[0.67rem] font-semibold tracking-[0.13em] text-text-muted">
-                        <span>CANONICAL COIN TYPE</span>
-                        <button
-                          type="button"
-                          onClick={() => void handleCopy("coinType", COLLATERAL_COIN_TYPE)}
-                          className="border border-border-panel px-2 py-1 text-[0.6rem] tracking-[0.1em] text-mint"
-                        >
-                          {copiedField === "coinType" ? "COPIED" : "COPY"}
-                        </button>
-                      </div>
-                      <div className="mt-2 break-all text-[0.82rem] leading-6 tracking-[0.05em] text-text">
-                        {truncateMiddle(COLLATERAL_COIN_TYPE, 18, 14)}
-                      </div>
-                    </div>
-                    <div className="grid gap-3 md:grid-cols-2">
-                      <div className="border border-border-panel bg-bg-panel p-4">
-                        <div className="text-[0.67rem] font-semibold tracking-[0.13em] text-text-muted">LIVE CANONICAL BALANCE</div>
-                        <div className="mt-2 text-[0.95rem] font-semibold tracking-[0.08em] text-text">{canonicalBalanceLabel}</div>
-                      </div>
-                      <div className="border border-border-panel bg-bg-panel p-4">
-                        <div className="text-[0.67rem] font-semibold tracking-[0.13em] text-text-muted">COIN OBJECTS</div>
-                        <div className="mt-2 text-[0.95rem] font-semibold tracking-[0.08em] text-text">{canonicalObjectCountLabel}</div>
-                      </div>
-                    </div>
-                    <div className="border border-border-panel bg-bg-panel p-4">
-                      <div className="text-[0.67rem] font-semibold tracking-[0.13em] text-text-muted">OTHER SUFFER TYPES</div>
-                      <div className="mt-2 text-[0.95rem] font-semibold tracking-[0.08em] text-text">
-                        {account ? String(legacySufferVariants.length) : "CONNECT WALLET"}
-                      </div>
-                      <div className="mt-2 text-[0.72rem] leading-5 text-text-dim">
-                        Older package deployments can leave separate SUFFER test tokens in the same wallet.
-                      </div>
-                    </div>
-                    <div className="border border-border-panel bg-bg-panel p-4">
-                      <div className="flex items-center justify-between gap-3 text-[0.67rem] font-semibold tracking-[0.13em] text-text-muted">
-                        <span>LATEST CLAIM TX</span>
-                        {successDigest && (
-                          <button
-                            type="button"
-                            onClick={() => void handleCopy("digest", successDigest)}
-                            className="border border-border-panel px-2 py-1 text-[0.6rem] tracking-[0.1em] text-mint"
-                          >
-                            {copiedField === "digest" ? "COPIED" : "COPY"}
-                          </button>
-                        )}
-                      </div>
-                      <div className="mt-2 text-[0.82rem] leading-6 tracking-[0.05em] text-text">
-                        {successDigest ? truncateMiddle(successDigest, 14, 12) : "Claim to pin the latest digest here."}
-                      </div>
-                      {explorerUrl && (
-                        <a
-                          href={explorerUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="mt-3 inline-flex items-center text-[0.72rem] font-semibold tracking-[0.11em] text-mint no-underline"
-                        >
-                          OPEN ON SUIVISION
-                        </a>
-                      )}
-                    </div>
-                  </div>
+                  ))}
                 </div>
 
-                <div className="border border-border-panel bg-[rgba(2,5,3,0.5)] p-5">
-                  <div className="mb-4 text-[0.68rem] font-semibold tracking-[0.13em] text-text-muted">YOUR SIGNALS</div>
-                  <div className="grid gap-3">
-                    <div className="border border-border-panel bg-bg-panel p-4">
-                      <div className="text-[0.67rem] font-semibold tracking-[0.13em] text-text-muted">CURRENT BALANCE</div>
-                      <div className="mt-2 text-[0.95rem] font-semibold tracking-[0.08em] text-text">
-                        {account ? `${formatCollateralAmount(balance.totalBalance, { minimumFractionDigits: 2 })} ${COLLATERAL_SYMBOL}` : "CONNECT WALLET"}
-                      </div>
-                    </div>
-                    <div className="border border-border-panel bg-bg-panel p-4">
-                      <div className="text-[0.67rem] font-semibold tracking-[0.13em] text-text-muted">FAUCET STATS</div>
-                      <div className="mt-2 text-[0.82rem] leading-6 tracking-[0.05em] text-text">
-                        {faucet ? `${faucet.trackedWallets.toString()} wallets tracked // ${faucet.totalClaimCount.toString()} claims executed` : "SYNCING FAUCET METRICS"}
-                      </div>
-                    </div>
-                    <div className="border border-border-panel bg-bg-panel p-4">
-                      <div className="text-[0.67rem] font-semibold tracking-[0.13em] text-text-muted">LAST CLAIMER STATE</div>
-                      <div className="mt-2 text-[0.82rem] leading-6 tracking-[0.05em] text-text">
-                        {accountClaim
-                          ? `Claim count: ${accountClaim.claimCount.toString()} // Total claimed: ${formatClaimAmount(accountClaim.totalClaimed)} ${COLLATERAL_SYMBOL}`
-                          : account
-                            ? "No prior claims for this wallet yet."
-                            : "Connect a wallet to check your claim history."}
-                      </div>
-                    </div>
+                <div className="mt-5 flex items-center justify-between gap-3 border-t border-border-panel pt-4">
+                  <div className="text-[0.72rem] leading-5 tracking-[0.05em] text-text-dim">
+                    Claim here with the same EVE Vault wallet address your Frontier rider uses.
                   </div>
+                  <Link
+                    to="/markets/diagnostics"
+                    className="text-[0.68rem] font-semibold tracking-[0.11em] text-mint no-underline"
+                  >
+                    VIEW TRUST DETAILS
+                  </Link>
                 </div>
               </div>
             </div>
@@ -1004,8 +1012,10 @@ export default function AirdropPage() {
             connectingWalletName={connectingWalletName}
             onClose={() => setWalletPickerOpen(false)}
             onSelect={handleConnect}
-            title="CHOOSE A WALLET TO CLAIM"
-            description="This faucet runs on Sui testnet. Pick the wallet you want to use and the claim flow will continue here."
+            title="CHOOSE THE WALLET TIED TO YOUR FRONTIER RIDER"
+            description="Use the same Frontier wallet address you copied in-game and loaded into EVE Vault. This faucet only opens for that wallet."
+            walletHint="Pick the wallet that matches your Frontier rider address in EVE Vault."
+            emptyStateText="No Sui wallet was detected in this browser yet. Install EVE Vault, load the Frontier wallet there, and come back to claim."
           />
         )}
 

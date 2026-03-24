@@ -8,6 +8,8 @@ interface WalletPickerProps {
   onSelect: (wallet: UiWallet) => void | Promise<void>;
   title?: string;
   description?: string;
+  walletHint?: string;
+  emptyStateText?: string;
 }
 
 export default function WalletPicker({
@@ -17,6 +19,8 @@ export default function WalletPicker({
   onSelect,
   title = "CHOOSE A SUI WALLET",
   description = "Pick the wallet you want to use on Sui testnet. The app will stop guessing for you.",
+  walletHint = "Use this wallet for the Orchestrator on Sui testnet.",
+  emptyStateText = "No Sui wallet was detected in this browser yet.",
 }: WalletPickerProps) {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -74,7 +78,7 @@ export default function WalletPicker({
                   <div className="min-w-0 flex-1">
                     <div className="text-[0.85rem] font-semibold tracking-[0.06em] text-text">{wallet.name}</div>
                     <div className="mt-1 text-[0.72rem] tracking-[0.05em] text-text-muted">
-                      {isConnecting ? "Connecting now..." : "Use this wallet for the Orchestrator on Sui testnet."}
+                      {isConnecting ? "Connecting now..." : walletHint}
                     </div>
                   </div>
                 </button>
@@ -82,7 +86,7 @@ export default function WalletPicker({
             })
           ) : (
             <div className="border border-border-panel bg-[rgba(2,5,3,0.5)] px-4 py-5 text-[0.8rem] leading-6 tracking-[0.04em] text-text-muted">
-              No Sui wallet was detected in this browser yet.
+              {emptyStateText}
             </div>
           )}
         </div>
