@@ -17,7 +17,7 @@ import { formatCollateralAmount } from "../lib/collateral";
 import { buildFaucetClaimTransaction } from "../lib/faucet-transactions";
 import { formatAddress } from "../lib/formatting";
 import { checkFaucetEligibility, checkRelayHealth, RelayApiError } from "../lib/gas-relay-client";
-import { COLLATERAL_SYMBOL, PM_FAUCET_ID, PM_GAS_RELAY_URL } from "../lib/market-constants";
+import { COLLATERAL_COIN_TYPE, COLLATERAL_SYMBOL, PM_FAUCET_ID, PM_GAS_RELAY_URL } from "../lib/market-constants";
 import { connectSelectedWallet } from "../lib/wallet-session";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -29,6 +29,7 @@ type ClaimMode =
   | "unavailable"
   | "relay_unavailable"
   | "eligibility_unavailable"
+  | "campaign_ended"
   | "noWallet"
   | "disconnected"
   | "no_character"
@@ -176,6 +177,14 @@ function formatClaimAmount(amount: bigint): string {
   return formatCollateralAmount(amount, { minimumFractionDigits: 0 });
 }
 
+function truncateMiddle(value: string, start = 12, end = 8): string {
+  if (!value || value.length <= start + end + 3) {
+    return value;
+  }
+
+  return `${value.slice(0, start)}...${value.slice(-end)}`;
+}
+
 function buildExplorerUrl(digest: string): string {
   return `${EXPLORER_BASE_URL}/${digest}`;
 }
@@ -187,6 +196,9 @@ function toFriendlyClaimError(error: unknown): string {
     }
     if (error.code === "eligibility_unavailable") {
       return error.reason ?? "Frontier eligibility could not be verified right now. Please try again shortly.";
+    }
+    if (error.code === "campaign_ended") {
+      return error.reason ?? "This Frontier faucet campaign has ended.";
     }
   }
 
@@ -213,6 +225,9 @@ function toFriendlyClaimError(error: unknown): string {
   if (normalized.includes("eligibility unavailable")) {
     return "Frontier eligibility could not be verified right now. Please try again shortly.";
   }
+  if (normalized.includes("campaign ended")) {
+    return "This Frontier faucet campaign has ended.";
+  }
   if (normalized.includes("gas relay") || normalized.includes("sponsored execution unavailable")) {
     return "Sponsored claims are unavailable right now.";
   }
@@ -232,6 +247,7 @@ export default function AirdropPage() {
   const [claimError, setClaimError] = useState<string | null>(null);
   const [successDigest, setSuccessDigest] = useState<string | null>(null);
   const [successAmount, setSuccessAmount] = useState<bigint | null>(null);
+  const [copiedField, setCopiedField] = useState<string | null>(null);
   const walletValue = account ? formatAddress(account.address) : "NOT CONNECTED";
   const balance = useCollateralBalance();
   const { executeSponsoredTx } = useSponsoredTransaction();
@@ -257,11 +273,26 @@ export default function AirdropPage() {
     staleTime: 10_000,
     refetchInterval: 15_000,
   });
+  const walletBalances = useQuery({
+    queryKey: ["wallet-balances", account?.address],
+    queryFn: () => protocolReadTransport.listWalletBalances(account!.address),
+    enabled: Boolean(account?.address),
+    staleTime: 30_000,
+  });
 
   useEffect(() => {
     const timer = window.setInterval(() => setNowMs(Date.now()), 1_000);
     return () => window.clearInterval(timer);
   }, []);
+
+  useEffect(() => {
+    if (!copiedField) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => setCopiedField(null), 1_500);
+    return () => window.clearTimeout(timer);
+  }, [copiedField]);
 
   useEffect(() => {
     setClaimStage("idle");
@@ -272,6 +303,10 @@ export default function AirdropPage() {
 
   const relayReady = relayConfigured && Boolean(relayHealth.data?.healthy);
   const relayUnavailable = relayConfigured && relayHealth.isFetched && !relayReady;
+  const campaignEnded = Boolean(relayHealth.data?.faucetCampaignEnded);
+  const campaignEndsAtLabel = relayHealth.data?.faucetCampaignEndsAt
+    ? formatResetTimestamp(Date.parse(relayHealth.data.faucetCampaignEndsAt))
+    : null;
   const currentUtcDay = getCurrentUtcDay(nowMs);
   const nextResetMs = getNextUtcResetMs(nowMs);
 
@@ -287,6 +322,23 @@ export default function AirdropPage() {
   const canAffordClaim = faucet ? faucet.poolBalance >= claimAmount : false;
   const nextClaimCountdown = formatCountdown(nextResetMs - nowMs);
   const explorerUrl = successDigest ? buildExplorerUrl(successDigest) : null;
+  const canonicalWalletBalance = walletBalances.data?.find((entry) => entry.coinType === COLLATERAL_COIN_TYPE) ?? null;
+  const legacySufferVariants =
+    walletBalances.data?.filter(
+      (entry) => entry.coinType.endsWith("::suffer::SUFFER") && entry.coinType !== COLLATERAL_COIN_TYPE,
+    ) ?? [];
+  const canonicalBalanceLabel =
+    account && walletBalances.isLoading
+      ? "SYNCING"
+      : account
+        ? `${formatCollateralAmount(BigInt(canonicalWalletBalance?.totalBalance ?? "0"), { minimumFractionDigits: 2 })} ${COLLATERAL_SYMBOL}`
+        : "CONNECT WALLET";
+  const canonicalObjectCountLabel =
+    account && walletBalances.isLoading
+      ? "SYNCING"
+      : account
+        ? String(canonicalWalletBalance?.coinObjectCount ?? 0)
+        : "CONNECT WALLET";
   const claimAmountLabel = !account
     ? "TODAY'S CLAIM"
     : sameClaimAmountEachDay
@@ -312,12 +364,15 @@ export default function AirdropPage() {
             (Boolean(account?.address) &&
               relayConfigured &&
               relayReady &&
+              !campaignEnded &&
               (faucetEligibility.isLoading || (!faucetEligibility.data && !faucetEligibility.isFetched)))
           ? "loading"
           : !faucet
             ? "unavailable"
             : !relayConfigured || relayUnavailable
               ? "relay_unavailable"
+              : campaignEnded
+                ? "campaign_ended"
               : !wallets.length
                 ? "noWallet"
                 : !account
@@ -328,6 +383,8 @@ export default function AirdropPage() {
                       ? "empty"
                       : hasClaimedToday
                         ? "cooldown"
+                        : faucetEligibility.data?.status === "campaign_ended"
+                          ? "campaign_ended"
                         : faucetEligibility.data?.status === "unavailable"
                           ? "eligibility_unavailable"
                           : faucetEligibility.data?.status === "no_character"
@@ -366,7 +423,7 @@ export default function AirdropPage() {
       const result = await executeSponsoredTx(tx);
       setSuccessDigest(result.digest);
       setSuccessAmount(claimAmount);
-      await Promise.all([refetchFaucet(), balance.refetch()]);
+      await Promise.all([refetchFaucet(), balance.refetch(), walletBalances.refetch()]);
     } catch (error) {
       console.error("Faucet claim failed:", error);
       setClaimError(toFriendlyClaimError(error));
@@ -380,6 +437,8 @@ export default function AirdropPage() {
       ? "CONFIRMED"
       : claimMode === "cooldown"
         ? "COOLDOWN"
+        : claimMode === "campaign_ended"
+          ? "ENDED"
         : claimMode === "no_character"
           ? "NO CHARACTER"
           : claimMode === "eligibility_unavailable"
@@ -405,6 +464,8 @@ export default function AirdropPage() {
         ? "text-tribe-b"
         : claimMode === "cooldown"
           ? "text-yellow"
+          : claimMode === "campaign_ended"
+            ? "text-orange"
           : claimMode === "no_character"
             ? "text-orange"
           : claimMode === "disconnected" || claimMode === "noWallet" || claimMode === "loading"
@@ -468,6 +529,13 @@ export default function AirdropPage() {
       faucetEligibility.data?.reason ??
       "The Stillness character gate could not be verified right now. Try again in a moment.";
     consoleToneClass = "text-orange";
+  } else if (claimMode === "campaign_ended") {
+    consoleHeadline = "THE FRONTIER FAUCET HAS ENDED.";
+    consoleBody =
+      relayHealth.data?.faucetCampaignEndsAt
+        ? `Claims closed at ${relayHealth.data.faucetCampaignEndsAt}.`
+        : "This faucet campaign has ended.";
+    consoleToneClass = "text-orange";
   } else if (claimMode === "no_character") {
     consoleHeadline = "FRONTIER CHARACTER REQUIRED.";
     consoleBody =
@@ -496,6 +564,15 @@ export default function AirdropPage() {
   } else if (claimMode === "success") {
     consoleHeadline = "CLAIM CONFIRMED.";
     consoleBody = "Your SFR has landed. Step back into the Orchestrator or open the transaction on the explorer.";
+  }
+
+  async function handleCopy(field: string, value: string) {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopiedField(field);
+    } catch (error) {
+      console.error(`Failed to copy ${field}:`, error);
+    }
   }
 
   return (
@@ -642,7 +719,11 @@ export default function AirdropPage() {
                   <div className="border border-border-panel bg-bg-panel p-4">
                     <div className="text-[0.67rem] font-semibold tracking-[0.13em] text-text-muted">NEXT RESET</div>
                     <div className="mt-2 text-[1rem] font-semibold tracking-[0.08em] text-text">{nextClaimCountdown}</div>
-                    <div className="mt-2 text-[0.72rem] leading-5 text-text-dim">The daily claim returns at 00:00 UTC.</div>
+                    <div className="mt-2 text-[0.72rem] leading-5 text-text-dim">
+                      {claimMode === "campaign_ended" && campaignEndsAtLabel
+                        ? `Campaign closed at ${campaignEndsAtLabel} UTC.`
+                        : "The daily claim returns at 00:00 UTC."}
+                    </div>
                   </div>
                 </div>
 
@@ -679,6 +760,14 @@ export default function AirdropPage() {
                       className="touch-target inline-flex min-h-12 items-center justify-center border border-yellow/60 bg-[rgba(219,210,124,0.08)] px-5 py-3 text-xs font-semibold uppercase tracking-[0.18em] text-yellow/80 disabled:cursor-not-allowed"
                     >
                       RETURNS AT 00:00 UTC
+                    </button>
+                  ) : claimMode === "campaign_ended" ? (
+                    <button
+                      type="button"
+                      disabled
+                      className="touch-target inline-flex min-h-12 items-center justify-center border border-orange-dim bg-[rgba(221,122,31,0.08)] px-5 py-3 text-xs font-semibold uppercase tracking-[0.18em] text-orange/80 disabled:cursor-not-allowed"
+                    >
+                      CAMPAIGN ENDED
                     </button>
                   ) : claimMode === "success" ? (
                     <>
@@ -774,7 +863,106 @@ export default function AirdropPage() {
                     <p className="m-0">
                       The faucet reads its live payout from chain. It resets at 00:00 UTC and opens once per wallet each UTC day.
                     </p>
-                    <p className="m-0">When sponsorship is live, gas is covered and the result lands here on the same page.</p>
+                    <p className="m-0">
+                      Wallet home screens can lag on custom testnet assets. The on-page balance and explorer transaction are the
+                      source of truth, and older SUFFER test tokens can still exist separately from the live one.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="border border-border-panel bg-[rgba(2,5,3,0.5)] p-5">
+                  <div className="mb-4 flex items-center justify-between gap-3">
+                    <div className="text-[0.68rem] font-semibold tracking-[0.13em] text-text-muted">ON-CHAIN TRUTH</div>
+                    <Link
+                      to="/markets/diagnostics"
+                      className="text-[0.68rem] font-semibold tracking-[0.11em] text-mint no-underline"
+                    >
+                      VIEW TRUST DETAILS
+                    </Link>
+                  </div>
+                  <div className="grid gap-3">
+                    <div className="border border-border-panel bg-bg-panel p-4">
+                      <div className="text-[0.67rem] font-semibold tracking-[0.13em] text-text-muted">NETWORK</div>
+                      <div className="mt-2 text-[0.95rem] font-semibold tracking-[0.08em] text-tribe-b">SUI TESTNET</div>
+                    </div>
+                    <div className="border border-border-panel bg-bg-panel p-4">
+                      <div className="flex items-center justify-between gap-3 text-[0.67rem] font-semibold tracking-[0.13em] text-text-muted">
+                        <span>CONNECTED WALLET</span>
+                        {account && (
+                          <button
+                            type="button"
+                            onClick={() => void handleCopy("wallet", account.address)}
+                            className="border border-border-panel px-2 py-1 text-[0.6rem] tracking-[0.1em] text-mint"
+                          >
+                            {copiedField === "wallet" ? "COPIED" : "COPY"}
+                          </button>
+                        )}
+                      </div>
+                      <div className="mt-2 break-all text-[0.82rem] leading-6 tracking-[0.05em] text-text">
+                        {account ? account.address : "CONNECT WALLET"}
+                      </div>
+                    </div>
+                    <div className="border border-border-panel bg-bg-panel p-4">
+                      <div className="flex items-center justify-between gap-3 text-[0.67rem] font-semibold tracking-[0.13em] text-text-muted">
+                        <span>CANONICAL COIN TYPE</span>
+                        <button
+                          type="button"
+                          onClick={() => void handleCopy("coinType", COLLATERAL_COIN_TYPE)}
+                          className="border border-border-panel px-2 py-1 text-[0.6rem] tracking-[0.1em] text-mint"
+                        >
+                          {copiedField === "coinType" ? "COPIED" : "COPY"}
+                        </button>
+                      </div>
+                      <div className="mt-2 break-all text-[0.82rem] leading-6 tracking-[0.05em] text-text">
+                        {truncateMiddle(COLLATERAL_COIN_TYPE, 18, 14)}
+                      </div>
+                    </div>
+                    <div className="grid gap-3 md:grid-cols-2">
+                      <div className="border border-border-panel bg-bg-panel p-4">
+                        <div className="text-[0.67rem] font-semibold tracking-[0.13em] text-text-muted">LIVE CANONICAL BALANCE</div>
+                        <div className="mt-2 text-[0.95rem] font-semibold tracking-[0.08em] text-text">{canonicalBalanceLabel}</div>
+                      </div>
+                      <div className="border border-border-panel bg-bg-panel p-4">
+                        <div className="text-[0.67rem] font-semibold tracking-[0.13em] text-text-muted">COIN OBJECTS</div>
+                        <div className="mt-2 text-[0.95rem] font-semibold tracking-[0.08em] text-text">{canonicalObjectCountLabel}</div>
+                      </div>
+                    </div>
+                    <div className="border border-border-panel bg-bg-panel p-4">
+                      <div className="text-[0.67rem] font-semibold tracking-[0.13em] text-text-muted">OTHER SUFFER TYPES</div>
+                      <div className="mt-2 text-[0.95rem] font-semibold tracking-[0.08em] text-text">
+                        {account ? String(legacySufferVariants.length) : "CONNECT WALLET"}
+                      </div>
+                      <div className="mt-2 text-[0.72rem] leading-5 text-text-dim">
+                        Older package deployments can leave separate SUFFER test tokens in the same wallet.
+                      </div>
+                    </div>
+                    <div className="border border-border-panel bg-bg-panel p-4">
+                      <div className="flex items-center justify-between gap-3 text-[0.67rem] font-semibold tracking-[0.13em] text-text-muted">
+                        <span>LATEST CLAIM TX</span>
+                        {successDigest && (
+                          <button
+                            type="button"
+                            onClick={() => void handleCopy("digest", successDigest)}
+                            className="border border-border-panel px-2 py-1 text-[0.6rem] tracking-[0.1em] text-mint"
+                          >
+                            {copiedField === "digest" ? "COPIED" : "COPY"}
+                          </button>
+                        )}
+                      </div>
+                      <div className="mt-2 text-[0.82rem] leading-6 tracking-[0.05em] text-text">
+                        {successDigest ? truncateMiddle(successDigest, 14, 12) : "Claim to pin the latest digest here."}
+                      </div>
+                      {explorerUrl && (
+                        <a
+                          href={explorerUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="mt-3 inline-flex items-center text-[0.72rem] font-semibold tracking-[0.11em] text-mint no-underline"
+                        >
+                          OPEN ON SUIVISION
+                        </a>
+                      )}
+                    </div>
                   </div>
                 </div>
 

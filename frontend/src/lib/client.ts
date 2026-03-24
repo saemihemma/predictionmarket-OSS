@@ -20,6 +20,12 @@ export interface NormalizedCoinBalance {
   balance: string;
 }
 
+export interface NormalizedWalletBalance {
+  coinType: string;
+  totalBalance: string;
+  coinObjectCount: number;
+}
+
 export interface ReadTransportStatus {
   primary: "graphql";
   fallbackAvailable: boolean;
@@ -32,6 +38,7 @@ interface ReadTransport {
   getObjects(ids: string[]): Promise<NormalizedSuiObjectResponse[]>;
   listOwnedObjects(input: { owner: string; type?: string }): Promise<NormalizedSuiObjectResponse[]>;
   listCoins(input: { owner: string; coinType: string }): Promise<NormalizedCoinBalance[]>;
+  listWalletBalances(owner: string): Promise<NormalizedWalletBalance[]>;
   listMarketIds(): Promise<string[]>;
   transportStatus(): ReadTransportStatus;
 }
@@ -358,6 +365,18 @@ async function listCoins({
   );
 }
 
+async function listWalletBalances(owner: string): Promise<NormalizedWalletBalance[]> {
+  return (
+    await rpcFallbackClient.getAllBalances({
+      owner,
+    })
+  ).map((balance) => ({
+    coinType: balance.coinType,
+    totalBalance: balance.totalBalance,
+    coinObjectCount: Number(balance.coinObjectCount ?? 0),
+  }));
+}
+
 function readMarketId(fields: unknown): string | null {
   if (!fields || typeof fields !== "object" || Array.isArray(fields)) {
     return null;
@@ -447,6 +466,7 @@ export const protocolReadTransport: ReadTransport = {
   getObjects,
   listOwnedObjects,
   listCoins,
+  listWalletBalances,
   listMarketIds,
   transportStatus,
 };

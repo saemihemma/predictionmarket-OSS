@@ -71,8 +71,15 @@ export interface ExecuteResponse {
 }
 
 export interface FaucetEligibilityResponse {
-  status: "eligible" | "no_character" | "unavailable";
+  status: "eligible" | "no_character" | "unavailable" | "campaign_ended";
   reason?: string;
+}
+
+export interface RelayHealthResponse {
+  status: string;
+  healthy: boolean;
+  faucetCampaignEnded?: boolean;
+  faucetCampaignEndsAt?: string;
 }
 
 /**
@@ -154,7 +161,7 @@ export async function checkFaucetEligibility(sender: string): Promise<FaucetElig
 /**
  * Check relay health.
  */
-export async function checkRelayHealth(): Promise<{ status: string; healthy: boolean }> {
+export async function checkRelayHealth(): Promise<RelayHealthResponse> {
   const relayUrl = protocolManifest.serviceUrls?.gasRelay ?? "";
   if (!relayUrl) {
     return { status: "not_configured", healthy: false };

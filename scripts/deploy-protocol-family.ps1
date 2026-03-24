@@ -31,7 +31,7 @@ param(
   [long]$EscalationTimeoutMs = 43200000,
   [long]$CreatorPriorityWindowMs = 86400000,
   [long]$EmergencyReviewWindowMs = 43200000,
-[long]$FaucetStarterAmount = 1000000,
+[long]$FaucetStarterAmount = 10000000,
 [long]$FaucetDailyAmount = 1000000,
 [long]$FaucetTopUpAmount = 500000000,
   [switch]$SkipBuild,

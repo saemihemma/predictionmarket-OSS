@@ -39,7 +39,8 @@ function shouldTripRelayHealth(error: unknown): boolean {
   if (error instanceof RelayApiError) {
     if (
       error.code === "frontier_character_required" ||
-      error.code === "eligibility_unavailable"
+      error.code === "eligibility_unavailable" ||
+      error.code === "campaign_ended"
     ) {
       return false;
     }

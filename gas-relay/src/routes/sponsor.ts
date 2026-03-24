@@ -5,6 +5,21 @@ import { validateTransactionRequest } from "../lib/tx-validator.js";
 import { leaseCoin, returnCoin, hasActiveLease, refreshCoinVersionFromChain } from "../lib/coin-pool.js";
 import { getFrontierEligibility } from "../lib/frontier-eligibility.js";
 
+const DEFAULT_FAUCET_CLAIM_END_AT = "2026-04-01T00:00:00Z";
+
+function getFaucetClaimEndAt(): string {
+  return process.env.FAUCET_CLAIM_END_AT?.trim() || DEFAULT_FAUCET_CLAIM_END_AT;
+}
+
+function isFaucetCampaignEnded(nowMs = Date.now()): boolean {
+  const endAtMs = Date.parse(getFaucetClaimEndAt());
+  return Number.isFinite(endAtMs) && nowMs >= endAtMs;
+}
+
+function faucetCampaignEndedReason(): string {
+  return `The Frontier faucet ended at ${getFaucetClaimEndAt()}.`;
+}
+
 /**
  * POST /v1/sponsor
  *
@@ -52,6 +67,15 @@ export async function sponsorRoute(req: Request, res: Response): Promise<void> {
       return;
     }
     if (validation.faucetClaim) {
+      if (isFaucetCampaignEnded()) {
+        res.status(410).json({
+          error: "Faucet campaign ended",
+          code: "campaign_ended",
+          reason: faucetCampaignEndedReason(),
+        });
+        return;
+      }
+
       const eligibility = await getFrontierEligibility(sender);
       if (eligibility.status === "no_character") {
         res.status(403).json({
@@ -187,6 +211,21 @@ export async function faucetEligibilityRoute(req: Request, res: Response): Promi
     return;
   }
 
+  if (isFaucetCampaignEnded()) {
+    res.json({
+      status: "campaign_ended",
+      reason: faucetCampaignEndedReason(),
+    });
+    return;
+  }
+
   const eligibility = await getFrontierEligibility(sender);
   res.json(eligibility);
+}
+
+export function getFaucetCampaignHealth() {
+  return {
+    faucetCampaignEnded: isFaucetCampaignEnded(),
+    faucetCampaignEndsAt: getFaucetClaimEndAt(),
+  };
 }
