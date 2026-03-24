@@ -23,6 +23,17 @@ interface SponsoredResult {
   digest: string;
 }
 
+function isWalletApprovalCancelled(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  const normalized = message.toLowerCase();
+  return (
+    normalized.includes("reject") ||
+    normalized.includes("cancel") ||
+    normalized.includes("declin") ||
+    normalized.includes("denied")
+  );
+}
+
 export function useSponsoredTransaction() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const dappKit = useDAppKit() as any;
@@ -59,24 +70,43 @@ export function useSponsoredTransaction() {
           });
           const kindB64 = btoa(String.fromCharCode(...kindBytes));
 
-          // Step 1: Get sponsored tx bytes from relay
-          const sponsored = await sponsorTransaction(kindB64, sender);
+          let sponsored;
+          try {
+            // Step 1: Get sponsored tx bytes from relay
+            sponsored = await sponsorTransaction(kindB64, sender);
+          } catch (err) {
+            relayHealthy.current = false;
+            throw new Error(
+              `Sponsored execution unavailable: ${err instanceof Error ? err.message : String(err)}`,
+            );
+          }
 
-          // Step 2: User signs the sponsored tx bytes
-          const txBytesArray = Uint8Array.from(atob(sponsored.txBytes), (c) => c.charCodeAt(0));
-          const { signature } = await dappKit.signTransaction({
-            transaction: txBytesArray,
-          });
+          let signed;
+          try {
+            // Step 2: User signs the full sponsored tx bytes returned by the relay
+            signed = await dappKit.signTransaction({
+              transaction: sponsored.txBytes,
+            });
+          } catch (err) {
+            if (isWalletApprovalCancelled(err)) {
+              throw new Error("Wallet approval was cancelled.");
+            }
+            throw err;
+          }
 
-          // Step 3: Send to relay for co-signing and execution (return leased coin)
-          const result = await executeRelay(sponsored.txBytes, signature, sponsored.gasCoinId);
-          return { digest: result.digest };
+          try {
+            // Step 3: Send the exact wallet-signed bytes back to the relay for co-signing and execution
+            const result = await executeRelay(signed.bytes, signed.signature, sponsored.gasCoinId);
+            return { digest: result.digest };
+          } catch (err) {
+            relayHealthy.current = false;
+            throw new Error(
+              `Sponsored execution unavailable: ${err instanceof Error ? err.message : String(err)}`,
+            );
+          }
         } catch (err) {
           console.warn("[sponsored-tx] Relay execution failed:", err);
-          relayHealthy.current = false;
-          throw new Error(
-            `Sponsored execution unavailable: ${err instanceof Error ? err.message : String(err)}`,
-          );
+          throw err instanceof Error ? err : new Error(String(err));
         }
       }
 

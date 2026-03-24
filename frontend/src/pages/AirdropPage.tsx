@@ -168,6 +168,14 @@ function toFriendlyClaimError(error: unknown): string {
   const normalized = message.toLowerCase();
 
   if (normalized.includes("wallet not connected")) return "Connect your wallet before you claim.";
+  if (
+    normalized.includes("cancel") ||
+    normalized.includes("reject") ||
+    normalized.includes("declin") ||
+    normalized.includes("denied")
+  ) {
+    return "Wallet approval was cancelled.";
+  }
   if (normalized.includes("already claimed")) return "You have already claimed today. Return after the next UTC reset.";
   if (normalized.includes("paused")) return "Claims are temporarily paused.";
   if (normalized.includes("enough collateral") || normalized.includes("insufficient faucet balance")) {
