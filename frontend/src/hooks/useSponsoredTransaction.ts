@@ -83,9 +83,11 @@ export function useSponsoredTransaction() {
 
           let signed;
           try {
-            // Step 2: User signs the full sponsored tx bytes returned by the relay
+            // Step 2: User signs the full sponsored tx returned by the relay.
+            // Using a Transaction object keeps one signing path while giving wallets
+            // the structured payload they expect for simulation and review.
             signed = await dappKit.signTransaction({
-              transaction: sponsored.txBytes,
+              transaction: Transaction.from(sponsored.txBytes),
             });
           } catch (err) {
             if (isWalletApprovalCancelled(err)) {

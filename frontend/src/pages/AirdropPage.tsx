@@ -18,7 +18,7 @@ import { checkRelayHealth } from "../lib/gas-relay-client";
 import { COLLATERAL_SYMBOL, PM_FAUCET_ID, PM_GAS_RELAY_URL } from "../lib/market-constants";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-const EXPLORER_BASE_URL = "https://suiexplorer.com/txblock";
+const EXPLORER_BASE_URL = "https://testnet.suivision.xyz/txblock";
 
 type ClaimStage = "idle" | "wallet" | "submitting";
 
@@ -160,7 +160,7 @@ function formatClaimAmount(amount: bigint): string {
 }
 
 function buildExplorerUrl(digest: string): string {
-  return `${EXPLORER_BASE_URL}/${digest}?network=testnet`;
+  return `${EXPLORER_BASE_URL}/${digest}`;
 }
 
 function toFriendlyClaimError(error: unknown): string {
@@ -531,7 +531,6 @@ export default function AirdropPage() {
               <div className="border border-border-panel bg-[rgba(2,5,3,0.5)] p-5 md:p-6">
                 <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
                   <div className="text-[0.68rem] font-semibold tracking-[0.13em] text-text-muted">LIVE CLAIM CONSOLE</div>
-                  <div className="text-[0.68rem] font-semibold tracking-[0.13em] text-orange">STAY ON THIS PAGE</div>
                 </div>
 
                 <h3 className={`m-0 text-[1.4rem] font-bold uppercase tracking-[0.12em] ${consoleToneClass} md:text-[2rem]`}>
@@ -649,22 +648,27 @@ export default function AirdropPage() {
                 )}
 
                 {claimMode === "success" && successAmount !== null && (
-                  <div className="mt-6 grid gap-3 md:grid-cols-3">
-                    <div className="border border-border-panel bg-bg-panel p-4">
-                      <div className="text-[0.67rem] font-semibold tracking-[0.13em] text-text-muted">CLAIMED</div>
-                      <div className="mt-2 text-[1rem] font-semibold tracking-[0.08em] text-mint">
-                        {formatClaimAmount(successAmount)} {COLLATERAL_SYMBOL}
+                  <div className="mt-6 space-y-3">
+                    <div className="grid gap-3 md:grid-cols-3">
+                      <div className="border border-border-panel bg-bg-panel p-4">
+                        <div className="text-[0.67rem] font-semibold tracking-[0.13em] text-text-muted">CLAIMED</div>
+                        <div className="mt-2 text-[1rem] font-semibold tracking-[0.08em] text-mint">
+                          {formatClaimAmount(successAmount)} {COLLATERAL_SYMBOL}
+                        </div>
+                      </div>
+                      <div className="border border-border-panel bg-bg-panel p-4">
+                        <div className="text-[0.67rem] font-semibold tracking-[0.13em] text-text-muted">UPDATED BALANCE</div>
+                        <div className="mt-2 text-[1rem] font-semibold tracking-[0.08em] text-text">
+                          {account ? `${formatCollateralAmount(balance.totalBalance, { minimumFractionDigits: 2 })} ${COLLATERAL_SYMBOL}` : "CONNECT WALLET"}
+                        </div>
+                      </div>
+                      <div className="border border-border-panel bg-bg-panel p-4">
+                        <div className="text-[0.67rem] font-semibold tracking-[0.13em] text-text-muted">NEXT CLAIM</div>
+                        <div className="mt-2 text-[1rem] font-semibold tracking-[0.08em] text-text">{nextClaimCountdown}</div>
                       </div>
                     </div>
-                    <div className="border border-border-panel bg-bg-panel p-4">
-                      <div className="text-[0.67rem] font-semibold tracking-[0.13em] text-text-muted">UPDATED BALANCE</div>
-                      <div className="mt-2 text-[1rem] font-semibold tracking-[0.08em] text-text">
-                        {account ? `${formatCollateralAmount(balance.totalBalance, { minimumFractionDigits: 2 })} ${COLLATERAL_SYMBOL}` : "CONNECT WALLET"}
-                      </div>
-                    </div>
-                    <div className="border border-border-panel bg-bg-panel p-4">
-                      <div className="text-[0.67rem] font-semibold tracking-[0.13em] text-text-muted">NEXT CLAIM</div>
-                      <div className="mt-2 text-[1rem] font-semibold tracking-[0.08em] text-text">{nextClaimCountdown}</div>
+                    <div className="border border-border-panel bg-[rgba(202,245,222,0.04)] px-4 py-3 text-[0.76rem] leading-6 tracking-[0.05em] text-text-muted">
+                      Wallets can take a moment to show custom assets. This balance and the explorer transaction are the source of truth while your wallet catches up.
                     </div>
                   </div>
                 )}
