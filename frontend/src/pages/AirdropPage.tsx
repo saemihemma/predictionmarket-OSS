@@ -16,7 +16,7 @@ import { protocolReadTransport } from "../lib/client";
 import { formatCollateralAmount } from "../lib/collateral";
 import { buildFaucetClaimTransaction } from "../lib/faucet-transactions";
 import { formatAddress } from "../lib/formatting";
-import { checkRelayHealth } from "../lib/gas-relay-client";
+import { checkFaucetEligibility, checkRelayHealth, RelayApiError } from "../lib/gas-relay-client";
 import { COLLATERAL_SYMBOL, PM_FAUCET_ID, PM_GAS_RELAY_URL } from "../lib/market-constants";
 import { connectSelectedWallet } from "../lib/wallet-session";
 
@@ -24,6 +24,20 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const EXPLORER_BASE_URL = "https://testnet.suivision.xyz/txblock";
 
 type ClaimStage = "idle" | "wallet" | "submitting";
+type ClaimMode =
+  | "loading"
+  | "unavailable"
+  | "relay_unavailable"
+  | "eligibility_unavailable"
+  | "noWallet"
+  | "disconnected"
+  | "no_character"
+  | "paused"
+  | "empty"
+  | "cooldown"
+  | "eligible"
+  | "claiming"
+  | "success";
 
 const LANDING_ART = [
   {
@@ -167,6 +181,15 @@ function buildExplorerUrl(digest: string): string {
 }
 
 function toFriendlyClaimError(error: unknown): string {
+  if (error instanceof RelayApiError) {
+    if (error.code === "frontier_character_required") {
+      return "Create your Frontier account and character first. This faucet only opens for wallets tied to a live Stillness character.";
+    }
+    if (error.code === "eligibility_unavailable") {
+      return error.reason ?? "Frontier eligibility could not be verified right now. Please try again shortly.";
+    }
+  }
+
   const message = error instanceof Error ? error.message : String(error);
   const normalized = message.toLowerCase();
 
@@ -183,6 +206,12 @@ function toFriendlyClaimError(error: unknown): string {
   if (normalized.includes("paused")) return "Claims are temporarily paused.";
   if (normalized.includes("enough collateral") || normalized.includes("insufficient faucet balance")) {
     return "The faucet is empty right now. Please try again later.";
+  }
+  if (normalized.includes("frontier character required")) {
+    return "Create your Frontier account and character first. This faucet only opens for wallets tied to a live Stillness character.";
+  }
+  if (normalized.includes("eligibility unavailable")) {
+    return "Frontier eligibility could not be verified right now. Please try again shortly.";
   }
   if (normalized.includes("gas relay") || normalized.includes("sponsored execution unavailable")) {
     return "Sponsored claims are unavailable right now.";
@@ -213,6 +242,13 @@ export default function AirdropPage() {
     enabled: relayConfigured,
     staleTime: 10_000,
     refetchInterval: 15_000,
+  });
+  const faucetEligibility = useQuery({
+    queryKey: ["faucet-eligibility", PM_GAS_RELAY_URL, account?.address],
+    queryFn: () => checkFaucetEligibility(account!.address),
+    enabled: relayConfigured && Boolean(account?.address) && Boolean(relayHealth.data?.healthy),
+    staleTime: 30_000,
+    refetchInterval: 60_000,
   });
   const { data: faucet, isLoading: faucetLoading, refetch: refetchFaucet } = useQuery({
     queryKey: ["faucet", PM_FAUCET_ID],
@@ -247,27 +283,41 @@ export default function AirdropPage() {
 
   const hasClaimedToday = accountClaim ? accountClaim.lastClaimDayUtc >= currentUtcDay : false;
   const claimAmount = accountClaim ? faucet?.dailyAmount ?? 0n : faucet?.starterAmount ?? 0n;
+  const sameClaimAmountEachDay = faucet ? faucet.starterAmount === faucet.dailyAmount : false;
   const canAffordClaim = faucet ? faucet.poolBalance >= claimAmount : false;
   const nextClaimCountdown = formatCountdown(nextResetMs - nowMs);
   const explorerUrl = successDigest ? buildExplorerUrl(successDigest) : null;
-  const claimAmountLabel = account ? "AVAILABLE NOW" : "FIRST CLAIM";
+  const claimAmountLabel = !account
+    ? "TODAY'S CLAIM"
+    : sameClaimAmountEachDay
+      ? "TODAY'S CLAIM"
+      : accountClaim
+        ? "AVAILABLE NOW"
+        : "FIRST CLAIM";
   const claimAmountCopy = !account
     ? "Connect wallet to see today's claim state."
-    : accountClaim
-      ? "Daily claim for this wallet."
-      : "First claim for this wallet.";
+    : sameClaimAmountEachDay
+      ? "This faucet pays the same amount each UTC day."
+      : accountClaim
+        ? "Daily claim for this wallet."
+        : "First claim for this wallet.";
 
-  const claimMode =
+  const claimMode: ClaimMode =
     claimStage !== "idle"
       ? "claiming"
       : successDigest
         ? "success"
-        : faucetLoading || (relayConfigured && relayHealth.isLoading)
+        : faucetLoading ||
+            (relayConfigured && relayHealth.isLoading) ||
+            (Boolean(account?.address) &&
+              relayConfigured &&
+              relayReady &&
+              (faucetEligibility.isLoading || (!faucetEligibility.data && !faucetEligibility.isFetched)))
           ? "loading"
           : !faucet
             ? "unavailable"
             : !relayConfigured || relayUnavailable
-              ? "unavailable"
+              ? "relay_unavailable"
               : !wallets.length
                 ? "noWallet"
                 : !account
@@ -278,7 +328,11 @@ export default function AirdropPage() {
                       ? "empty"
                       : hasClaimedToday
                         ? "cooldown"
-                        : "eligible";
+                        : faucetEligibility.data?.status === "unavailable"
+                          ? "eligibility_unavailable"
+                          : faucetEligibility.data?.status === "no_character"
+                            ? "no_character"
+                            : "eligible";
 
   async function handleConnect(wallet: UiWallet) {
     setConnectingWalletName(wallet.name);
@@ -326,14 +380,18 @@ export default function AirdropPage() {
       ? "CONFIRMED"
       : claimMode === "cooldown"
         ? "COOLDOWN"
+        : claimMode === "no_character"
+          ? "NO CHARACTER"
+          : claimMode === "eligibility_unavailable"
+            ? "ELIGIBILITY DOWN"
         : claimMode === "eligible"
           ? "READY"
           : claimMode === "claiming"
             ? "IN FLIGHT"
-            : claimMode === "disconnected" || claimMode === "noWallet"
-              ? "AWAITING WALLET"
-              : claimMode === "loading"
-                ? "SYNCING"
+              : claimMode === "disconnected" || claimMode === "noWallet"
+                ? "AWAITING WALLET"
+                : claimMode === "loading"
+                  ? "SYNCING"
                 : claimMode === "paused"
                   ? "PAUSED"
                   : claimMode === "empty"
@@ -347,6 +405,8 @@ export default function AirdropPage() {
         ? "text-tribe-b"
         : claimMode === "cooldown"
           ? "text-yellow"
+          : claimMode === "no_character"
+            ? "text-orange"
           : claimMode === "disconnected" || claimMode === "noWallet" || claimMode === "loading"
             ? "text-text"
             : "text-orange";
@@ -358,12 +418,14 @@ export default function AirdropPage() {
     },
     {
       ...LANDING_ART[1],
-      copy: `Starter claim: ${faucet ? `${formatClaimAmount(faucet.starterAmount)} ${COLLATERAL_SYMBOL}` : "SYNCING"}.`,
+      copy: faucet
+        ? `${sameClaimAmountEachDay ? "Claim amount" : "Starter claim"}: ${formatClaimAmount(faucet.starterAmount)} ${COLLATERAL_SYMBOL}.`
+        : "Claim amount syncing from the faucet.",
     },
     {
       ...LANDING_ART[2],
       copy: faucet
-        ? `Daily return: ${formatClaimAmount(faucet.dailyAmount)} ${COLLATERAL_SYMBOL}. Resets at ${formatResetTimestamp(nextResetMs)} UTC.`
+        ? `${sameClaimAmountEachDay ? "Returns daily" : "Daily return"}: ${formatClaimAmount(faucet.dailyAmount)} ${COLLATERAL_SYMBOL}. Resets at ${formatResetTimestamp(nextResetMs)} UTC.`
         : `Claims reset at ${formatResetTimestamp(nextResetMs)} UTC.`,
     },
   ] as const;
@@ -394,11 +456,23 @@ export default function AirdropPage() {
     consoleHeadline = "NO SUI WALLET DETECTED.";
     consoleBody = "A Sui wallet opens this gate. Install one, return here, and claim on testnet.";
     consoleToneClass = "text-orange";
-  } else if (claimMode === "unavailable") {
+  } else if (claimMode === "relay_unavailable" || claimMode === "unavailable") {
     consoleHeadline = "SPONSORED CLAIMS ARE UNAVAILABLE.";
     consoleBody = relayConfigured
       ? "The gate is quiet for a moment. Claims reopen here as soon as sponsorship returns."
       : "This deployment has not opened the claim channel yet.";
+    consoleToneClass = "text-orange";
+  } else if (claimMode === "eligibility_unavailable") {
+    consoleHeadline = "FRONTIER ELIGIBILITY IS UNAVAILABLE.";
+    consoleBody =
+      faucetEligibility.data?.reason ??
+      "The Stillness character gate could not be verified right now. Try again in a moment.";
+    consoleToneClass = "text-orange";
+  } else if (claimMode === "no_character") {
+    consoleHeadline = "FRONTIER CHARACTER REQUIRED.";
+    consoleBody =
+      faucetEligibility.data?.reason ??
+      "Create your Frontier account and character first. This faucet only opens for wallets tied to a live Stillness character.";
     consoleToneClass = "text-orange";
   } else if (claimMode === "paused") {
     consoleHeadline = "THE FAUCET IS TEMPORARILY PAUSED.";
@@ -590,6 +664,14 @@ export default function AirdropPage() {
                     >
                       CLAIM {formatClaimAmount(claimAmount)} {COLLATERAL_SYMBOL}
                     </button>
+                  ) : claimMode === "no_character" ? (
+                    <button
+                      type="button"
+                      disabled
+                      className="touch-target inline-flex min-h-12 items-center justify-center border border-orange-dim bg-[rgba(221,122,31,0.08)] px-5 py-3 text-xs font-semibold uppercase tracking-[0.18em] text-orange/80 disabled:cursor-not-allowed"
+                    >
+                      FRONTIER CHARACTER REQUIRED
+                    </button>
                   ) : claimMode === "cooldown" ? (
                     <button
                       type="button"
@@ -621,7 +703,11 @@ export default function AirdropPage() {
                     <div className="text-[0.78rem] uppercase tracking-[0.14em] text-tribe-b">Wallet approval in progress...</div>
                   ) : (
                     <div className="text-[0.78rem] uppercase tracking-[0.14em] text-orange">
-                      {claimMode === "loading" ? "SYNCING CLAIM CHANNEL" : "CLAIMS UNAVAILABLE RIGHT NOW"}
+                      {claimMode === "loading"
+                        ? "SYNCING CLAIM CHANNEL"
+                        : claimMode === "eligibility_unavailable"
+                          ? "FRONTIER ELIGIBILITY UNAVAILABLE"
+                          : "CLAIMS UNAVAILABLE RIGHT NOW"}
                     </div>
                   )}
                 </div>
@@ -686,7 +772,7 @@ export default function AirdropPage() {
                       This page is the claim gate. Choose a Sui-compatible wallet, press claim, and approve when your wallet asks.
                     </p>
                     <p className="m-0">
-                      First-time riders draw the starter amount. After that, the frontier resets at 00:00 UTC and the daily amount returns.
+                      The faucet reads its live payout from chain. It resets at 00:00 UTC and opens once per wallet each UTC day.
                     </p>
                     <p className="m-0">When sponsorship is live, gas is covered and the result lands here on the same page.</p>
                   </div>

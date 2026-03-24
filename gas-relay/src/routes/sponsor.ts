@@ -3,6 +3,7 @@ import { Transaction } from "@mysten/sui/transactions";
 import { suiClient, getSponsorKeypair, getSponsorAddress } from "../lib/sui-client.js";
 import { validateTransactionRequest } from "../lib/tx-validator.js";
 import { leaseCoin, returnCoin, hasActiveLease, refreshCoinVersionFromChain } from "../lib/coin-pool.js";
+import { getFrontierEligibility } from "../lib/frontier-eligibility.js";
 
 /**
  * POST /v1/sponsor
@@ -49,6 +50,26 @@ export async function sponsorRoute(req: Request, res: Response): Promise<void> {
     if (!validation.valid) {
       res.status(400).json({ error: validation.reason });
       return;
+    }
+    if (validation.faucetClaim) {
+      const eligibility = await getFrontierEligibility(sender);
+      if (eligibility.status === "no_character") {
+        res.status(403).json({
+          error: "Frontier character required",
+          code: "frontier_character_required",
+          reason: eligibility.reason,
+        });
+        return;
+      }
+
+      if (eligibility.status === "unavailable") {
+        res.status(503).json({
+          error: "Frontier eligibility unavailable",
+          code: "eligibility_unavailable",
+          reason: eligibility.reason,
+        });
+        return;
+      }
     }
 
     const sponsorAddress = getSponsorAddress();
@@ -157,4 +178,15 @@ export async function executeRoute(req: Request, res: Response): Promise<void> {
       returnCoin(gasCoinId);
     }
   }
+}
+
+export async function faucetEligibilityRoute(req: Request, res: Response): Promise<void> {
+  const sender = typeof req.query.sender === "string" ? req.query.sender : "";
+  if (!sender.trim()) {
+    res.status(400).json({ error: "Missing sender" });
+    return;
+  }
+
+  const eligibility = await getFrontierEligibility(sender);
+  res.json(eligibility);
 }

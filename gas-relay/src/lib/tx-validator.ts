@@ -84,6 +84,7 @@ type TxDataShape = {
 export interface ValidationResult {
   valid: boolean;
   reason?: string;
+  faucetClaim?: boolean;
 }
 
 export async function validateTransactionRequest(
@@ -123,6 +124,7 @@ export async function validateTransactionRequest(
   }
 
   let disputeRoundId: string | undefined;
+  let faucetClaim = false;
 
   for (const command of txData.commands ?? []) {
     if (command.$kind === "MoveCall" || command.MoveCall) {
@@ -159,6 +161,10 @@ export async function validateTransactionRequest(
           valid: false,
           reason: `MoveCall targets ${module}::${fn}, which is not sponsored for public beta.`,
         };
+      }
+
+      if (module === "pm_faucet" && fn === "claim") {
+        faucetClaim = true;
       }
 
       if ((module === "pm_sdvm" || module === "pm_dispute") && !disputeRoundId) {
@@ -207,7 +213,7 @@ export async function validateTransactionRequest(
     }
 
     rateLimiter.recordRequest(disputeRoundId, sender);
-    return { valid: true };
+    return { valid: true, faucetClaim };
   }
 
   if (!rateLimiter.checkRateLimit("_global", sender)) {
@@ -219,5 +225,5 @@ export async function validateTransactionRequest(
   }
 
   rateLimiter.recordRequest("_global", sender);
-  return { valid: true };
+  return { valid: true, faucetClaim };
 }

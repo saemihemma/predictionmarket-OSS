@@ -17,6 +17,7 @@ import {
   sponsorTransaction,
   executeSponsored as executeRelay,
   checkRelayHealth,
+  RelayApiError,
 } from "../lib/gas-relay-client";
 
 interface SponsoredResult {
@@ -32,6 +33,21 @@ function isWalletApprovalCancelled(error: unknown): boolean {
     normalized.includes("declin") ||
     normalized.includes("denied")
   );
+}
+
+function shouldTripRelayHealth(error: unknown): boolean {
+  if (error instanceof RelayApiError) {
+    if (
+      error.code === "frontier_character_required" ||
+      error.code === "eligibility_unavailable"
+    ) {
+      return false;
+    }
+
+    return error.status >= 500;
+  }
+
+  return true;
 }
 
 export function useSponsoredTransaction() {
@@ -75,10 +91,14 @@ export function useSponsoredTransaction() {
             // Step 1: Get sponsored tx bytes from relay
             sponsored = await sponsorTransaction(kindB64, sender);
           } catch (err) {
-            relayHealthy.current = false;
-            throw new Error(
-              `Sponsored execution unavailable: ${err instanceof Error ? err.message : String(err)}`,
-            );
+            if (shouldTripRelayHealth(err)) {
+              relayHealthy.current = false;
+              throw new Error(
+                `Sponsored execution unavailable: ${err instanceof Error ? err.message : String(err)}`,
+              );
+            }
+
+            throw err;
           }
 
           let signed;
@@ -101,10 +121,14 @@ export function useSponsoredTransaction() {
             const result = await executeRelay(signed.bytes, signed.signature, sponsored.gasCoinId);
             return { digest: result.digest };
           } catch (err) {
-            relayHealthy.current = false;
-            throw new Error(
-              `Sponsored execution unavailable: ${err instanceof Error ? err.message : String(err)}`,
-            );
+            if (shouldTripRelayHealth(err)) {
+              relayHealthy.current = false;
+              throw new Error(
+                `Sponsored execution unavailable: ${err instanceof Error ? err.message : String(err)}`,
+              );
+            }
+
+            throw err;
           }
         } catch (err) {
           console.warn("[sponsored-tx] Relay execution failed:", err);

@@ -1,7 +1,7 @@
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
-import { sponsorRoute, executeRoute } from "./routes/sponsor.js";
+import { sponsorRoute, executeRoute, faucetEligibilityRoute } from "./routes/sponsor.js";
 import { healthRoute } from "./routes/health.js";
 import { checkBalance } from "./lib/balance-monitor.js";
 import { initCoinPool } from "./lib/coin-pool.js";
@@ -92,6 +92,7 @@ app.use("/v1", apiKeyMiddleware);
 
 // Routes
 app.get("/health", healthRoute);
+app.get("/v1/faucet-eligibility", faucetEligibilityRoute);
 app.post("/v1/sponsor", sponsorRoute);
 app.post("/v1/execute", executeRoute);
 
