@@ -3,24 +3,54 @@ import { useCurrentAccount, useDAppKit, useWallets } from "@mysten/dapp-kit-reac
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import airdropFigure from "../assets/airdrop-figure.png";
-import sufferCoin from "../assets/suffer-coin.png";
+import sufferClaimMark from "../assets/suffer-claim-mark.png";
+import sufferCycleMint from "../assets/suffer-cycle-mint.svg";
 import TerminalScreen from "../components/terminal/TerminalScreen";
 import Footer from "../components/ui/Footer";
 import PageHeader from "../components/ui/PageHeader";
 import { useCollateralBalance } from "../hooks/useCollateralBalance";
-import { useServiceHealth } from "../hooks/useServiceHealth";
 import { useSponsoredTransaction } from "../hooks/useSponsoredTransaction";
 import { protocolReadTransport } from "../lib/client";
 import { formatCollateralAmount } from "../lib/collateral";
 import { buildFaucetClaimTransaction } from "../lib/faucet-transactions";
 import { formatAddress } from "../lib/formatting";
+import { checkRelayHealth } from "../lib/gas-relay-client";
 import { COLLATERAL_SYMBOL, PM_FAUCET_ID, PM_GAS_RELAY_URL } from "../lib/market-constants";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-const PUBLIC_AIRDROP_URL = "https://lineagewar.xyz/airdrop";
 const EXPLORER_BASE_URL = "https://suiexplorer.com/txblock";
 
 type ClaimStage = "idle" | "wallet" | "submitting";
+
+const LANDING_ART = [
+  {
+    label: "01 // FRONTIER",
+    alt: "Rider of the Frontier",
+    art: airdropFigure,
+    artClassName: "w-24 sm:w-28",
+    shellClassName: "border-border-panel bg-[radial-gradient(circle_at_top,rgba(202,245,222,0.08),rgba(2,5,3,0.2)_56%),rgba(2,5,3,0.58)]",
+    textClassName: "text-text",
+    imageGlowClassName: "drop-shadow-[0_0_18px_rgba(202,245,222,0.18)]",
+  },
+  {
+    label: "02 // CLAIM",
+    alt: "SUFFER claim mark",
+    art: sufferClaimMark,
+    artClassName: "w-26 sm:w-30",
+    shellClassName: "border-orange-dim bg-[radial-gradient(circle_at_top,rgba(221,122,31,0.12),rgba(2,5,3,0.22)_56%),rgba(2,5,3,0.58)]",
+    textClassName: "text-orange",
+    imageGlowClassName: "drop-shadow-[0_0_22px_rgba(221,122,31,0.28)]",
+  },
+  {
+    label: "03 // RETURN",
+    alt: "SUFFER return cycle mark",
+    art: sufferCycleMint,
+    artClassName: "w-20 sm:w-24",
+    shellClassName: "border-border-panel bg-[radial-gradient(circle_at_top,rgba(202,245,222,0.08),rgba(2,5,3,0.2)_56%),rgba(2,5,3,0.58)]",
+    textClassName: "text-text",
+    imageGlowClassName: "drop-shadow-[0_0_14px_rgba(202,245,222,0.15)]",
+  },
+] as const;
 
 interface FaucetClaimRecord {
   owner: string;
@@ -161,10 +191,17 @@ export default function AirdropPage() {
   const [claimError, setClaimError] = useState<string | null>(null);
   const [successDigest, setSuccessDigest] = useState<string | null>(null);
   const [successAmount, setSuccessAmount] = useState<bigint | null>(null);
-  const walletValue = account ? formatAddress(account.address) : "SYNC REQUIRED";
-  const relayHealth = useServiceHealth("gas-relay", PM_GAS_RELAY_URL);
+  const walletValue = account ? formatAddress(account.address) : "NOT CONNECTED";
   const balance = useCollateralBalance();
   const { executeSponsoredTx } = useSponsoredTransaction();
+  const relayConfigured = Boolean(PM_GAS_RELAY_URL);
+  const relayHealth = useQuery({
+    queryKey: ["gas-relay-health", PM_GAS_RELAY_URL],
+    queryFn: checkRelayHealth,
+    enabled: relayConfigured,
+    staleTime: 10_000,
+    refetchInterval: 15_000,
+  });
   const { data: faucet, isLoading: faucetLoading, refetch: refetchFaucet } = useQuery({
     queryKey: ["faucet", PM_FAUCET_ID],
     queryFn: fetchFaucetSnapshot,
@@ -185,8 +222,7 @@ export default function AirdropPage() {
     setSuccessAmount(null);
   }, [account?.address]);
 
-  const relayConfigured = Boolean(PM_GAS_RELAY_URL);
-  const relayReady = relayConfigured && Boolean(relayHealth.data?.ok);
+  const relayReady = relayConfigured && Boolean(relayHealth.data?.healthy);
   const relayUnavailable = relayConfigured && relayHealth.isFetched && !relayReady;
   const currentUtcDay = getCurrentUtcDay(nowMs);
   const nextResetMs = getNextUtcResetMs(nowMs);
@@ -202,22 +238,28 @@ export default function AirdropPage() {
   const canAffordClaim = faucet ? faucet.poolBalance >= claimAmount : false;
   const nextClaimCountdown = formatCountdown(nextResetMs - nowMs);
   const explorerUrl = successDigest ? buildExplorerUrl(successDigest) : null;
+  const claimAmountLabel = account ? "AVAILABLE NOW" : "FIRST CLAIM";
+  const claimAmountCopy = !account
+    ? "Connect wallet to see today's claim state."
+    : accountClaim
+      ? "Daily claim for this wallet."
+      : "First claim for this wallet.";
 
   const claimMode =
     claimStage !== "idle"
       ? "claiming"
       : successDigest
         ? "success"
-        : !wallets.length
-          ? "noWallet"
-          : !account
-            ? "disconnected"
-            : faucetLoading || (relayConfigured && relayHealth.isLoading)
-              ? "loading"
-              : !faucet
-                ? "unavailable"
-                : !relayConfigured || relayUnavailable
-                  ? "unavailable"
+        : faucetLoading || (relayConfigured && relayHealth.isLoading)
+          ? "loading"
+          : !faucet
+            ? "unavailable"
+            : !relayConfigured || relayUnavailable
+              ? "unavailable"
+              : !wallets.length
+                ? "noWallet"
+                : !account
+                  ? "disconnected"
                   : faucet.paused
                     ? "paused"
                     : !canAffordClaim
@@ -267,59 +309,84 @@ export default function AirdropPage() {
     }
   }
 
+  const claimsValue =
+    claimMode === "success"
+      ? "CONFIRMED"
+      : claimMode === "cooldown"
+        ? "COOLDOWN"
+        : claimMode === "eligible"
+          ? "READY"
+          : claimMode === "claiming"
+            ? "IN FLIGHT"
+            : claimMode === "disconnected" || claimMode === "noWallet"
+              ? "AWAITING WALLET"
+              : claimMode === "loading"
+                ? "SYNCING"
+                : claimMode === "paused"
+                  ? "PAUSED"
+                  : claimMode === "empty"
+                    ? "EMPTY"
+                    : "UNAVAILABLE";
+
+  const claimsTone =
+    claimMode === "success" || claimMode === "eligible"
+      ? "text-mint"
+      : claimMode === "claiming"
+        ? "text-tribe-b"
+        : claimMode === "cooldown"
+          ? "text-yellow"
+          : claimMode === "disconnected" || claimMode === "noWallet" || claimMode === "loading"
+            ? "text-text"
+            : "text-orange";
+
+  const landingCards = [
+    {
+      ...LANDING_ART[0],
+      copy: "Only for riders of the Frontier.",
+    },
+    {
+      ...LANDING_ART[1],
+      copy: `Starter claim: ${faucet ? `${formatClaimAmount(faucet.starterAmount)} ${COLLATERAL_SYMBOL}` : "SYNCING"}.`,
+    },
+    {
+      ...LANDING_ART[2],
+      copy: faucet
+        ? `Daily return: ${formatClaimAmount(faucet.dailyAmount)} ${COLLATERAL_SYMBOL}. Resets at ${formatResetTimestamp(nextResetMs)} UTC.`
+        : `Claims reset at ${formatResetTimestamp(nextResetMs)} UTC.`,
+    },
+  ] as const;
+
   const statusItems = [
     { label: "NETWORK", value: "TESTNET", tone: "text-tribe-b" },
     { label: "TOKEN", value: "SFR", tone: "text-mint" },
     {
       label: "SPONSORSHIP",
       value: relayConfigured ? (relayReady ? "ONLINE" : relayHealth.isLoading ? "CHECKING" : "OFFLINE") : "UNCONFIGURED",
-      tone: relayReady ? "text-mint" : "text-orange",
+      tone: relayReady ? "text-mint" : relayHealth.isLoading ? "text-text" : "text-orange",
     },
     {
       label: "CLAIMS",
-      value:
-        claimMode === "success"
-          ? "CONFIRMED"
-          : claimMode === "cooldown"
-            ? "COOLDOWN"
-            : claimMode === "eligible"
-              ? "READY"
-              : claimMode === "claiming"
-                ? "IN FLIGHT"
-                : "STANDBY",
-      tone:
-        claimMode === "success" || claimMode === "eligible"
-          ? "text-mint"
-          : claimMode === "claiming"
-            ? "text-tribe-b"
-            : claimMode === "cooldown"
-              ? "text-yellow"
-              : "text-orange",
+      value: claimsValue,
+      tone: claimsTone,
     },
   ] as const;
 
-  const briefingItems = [
-    `Starter claim: ${faucet ? `${formatClaimAmount(faucet.starterAmount)} ${COLLATERAL_SYMBOL}` : "SYNCING"}`,
-    `Daily return: ${faucet ? `${formatClaimAmount(faucet.dailyAmount)} ${COLLATERAL_SYMBOL}` : "SYNCING"}`,
-    `Claims reset at ${formatResetTimestamp(nextResetMs)} UTC.`,
-  ] as const;
-
   let consoleHeadline = "CONNECT TO CLAIM YOUR $SUFFERING.";
-  let consoleBody = "Stay on this page. The wallet modal is the only popup. After that, the claim result lands right here.";
+  let consoleBody = "Connect your wallet, claim from this console, and watch the reward arrive here after approval.";
   let consoleToneClass = "text-mint";
 
   if (claimMode === "loading") {
     consoleHeadline = "SYNCING CLAIM CONSOLE.";
-    consoleBody = "Loading faucet balance, sponsorship status, and your wallet context.";
+    consoleBody = "Reading the faucet, the sponsorship channel, and your wallet signal.";
   } else if (claimMode === "noWallet") {
     consoleHeadline = "NO SUI WALLET DETECTED.";
-    consoleBody = "Install a Sui wallet to claim on testnet. Once it is available, connect here and stay on this page.";
+    consoleBody = "A Sui wallet opens this gate. Install one, return here, and claim on testnet.";
     consoleToneClass = "text-orange";
   } else if (claimMode === "unavailable") {
     consoleHeadline = "SPONSORED CLAIMS ARE UNAVAILABLE.";
     consoleBody = relayConfigured
-      ? "The relay is not healthy right now, so claims are fail-closed until sponsorship is back."
-      : "The relay URL is not configured in this deployment yet, so claims are intentionally disabled.";
+      ? "The gate is quiet for a moment. Claims reopen here as soon as sponsorship returns."
+      : "This deployment has not opened the claim channel yet.";
     consoleToneClass = "text-orange";
   } else if (claimMode === "paused") {
     consoleHeadline = "THE FAUCET IS TEMPORARILY PAUSED.";
@@ -335,33 +402,20 @@ export default function AirdropPage() {
     consoleToneClass = "text-yellow";
   } else if (claimMode === "eligible") {
     consoleHeadline = accountClaim ? "YOUR DAILY SUFFERING IS READY." : "YOUR FIRST SUFFERING IS READY.";
-    consoleBody = "Gas is sponsored. You will approve in your wallet, then this console will confirm the on-chain claim.";
+    consoleBody = "Gas is covered. Approve in your wallet and this console will welcome the claim home.";
   } else if (claimMode === "claiming") {
     consoleHeadline = "PROCESSING YOUR CLAIM.";
-    consoleBody = "Approve in your wallet, then wait while the sponsored transaction is submitted and confirmed.";
+    consoleBody = "Approve in your wallet, then hold the line while the claim clears on-chain.";
     consoleToneClass = "text-tribe-b";
   } else if (claimMode === "success") {
     consoleHeadline = "CLAIM CONFIRMED.";
-    consoleBody = "Your SFR is on-chain now. You can head back to the Orchestrator or open the transaction in the explorer.";
+    consoleBody = "Your SFR has landed. Step back into the Orchestrator or open the transaction on the explorer.";
   }
 
   return (
     <TerminalScreen>
       <div className="min-h-screen flex flex-col">
-        <PageHeader
-          subtitle="SUFFER AIRDROP"
-          showBack
-          actions={
-            <a
-              href={PUBLIC_AIRDROP_URL}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="touch-target inline-flex items-center border border-orange-dim bg-[rgba(221,122,31,0.08)] px-3 py-2 text-[0.65rem] font-semibold tracking-[0.16em] text-orange no-underline"
-            >
-              PUBLIC SITE
-            </a>
-          }
-        />
+        <PageHeader subtitle="SUFFER AIRDROP" showBack />
 
         <div className="border-b border-border-grid">
           <div className="page-shell grid gap-3 py-3 text-xs tracking-[0.08em] text-text sm:grid-cols-2 xl:grid-cols-5">
@@ -377,97 +431,64 @@ export default function AirdropPage() {
         </div>
 
         <main className="page-shell page-section flex-1">
-          <section className="grid items-stretch gap-6 lg:grid-cols-[1.08fr_0.92fr]">
-            <div className="relative flex flex-col justify-between overflow-hidden border border-border-panel bg-bg-panel p-6 md:p-8">
+          <section className="space-y-6">
+            <div className="relative overflow-hidden border border-border-panel bg-bg-panel p-6 md:p-8">
               <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(180deg,rgba(202,245,222,0.05)_0%,rgba(202,245,222,0)_38%)]" />
               <div className="absolute left-8 right-8 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(202,245,222,0.35),transparent)]" />
 
-              <div className="relative z-10">
-                <div className="mb-6 flex flex-wrap items-center gap-3 text-[0.6rem] tracking-[0.18em]">
-                  <span className="border border-mint-dim bg-[rgba(202,245,222,0.08)] px-2 py-1 text-mint">
-                    ONLY FOR THOSE FEELING PAIN IN THE FRONTIER
-                  </span>
-                  <span className="text-text-dim">DAILY ONBOARDING FAUCET // TESTNET</span>
+              <div className="relative z-10 max-w-[56rem]">
+                <div className="text-[0.8rem] font-semibold uppercase tracking-[0.2em] text-orange md:text-[0.95rem]">
+                  DO YOU WANT TO SUFFER?
                 </div>
+                <h2 className="mt-4 m-0 text-[2rem] font-bold uppercase leading-[1.02] tracking-[0.12em] text-mint md:text-[3rem]">
+                  <span className="block">CLAIM YOUR $SUFFERING.</span>
+                  <span className="mt-1 block">COME BACK EVERY DAY TO $SUFFER MORE.</span>
+                </h2>
 
-                <div className="max-w-[42rem]">
-                  <h2 className="m-0 text-[2rem] font-bold uppercase leading-[1.02] tracking-[0.12em] text-mint md:text-[3rem]">
-                    DO YOU WANT TO $SUFFER?
-                    <br />
-                    CLAIM YOUR $SUFFERING.
-                    <br />
-                    COME BACK EVERY DAY TO
-                    <br />
-                    SUFFER MORE.
-                  </h2>
-                  <p className="mt-5 max-w-[38rem] text-sm leading-7 tracking-[0.06em] text-text-muted md:text-[0.95rem]">
-                    The Orchestrator pays in pain. Claim on the same page, approve in your wallet, and watch the result land
-                    in the live console below.
-                  </p>
-                </div>
+                <p className="mt-5 max-w-[40rem] text-sm leading-6 tracking-[0.06em] text-text-muted md:text-[0.95rem] md:leading-7">
+                  The Orchestrator pays in pain. Claim from this page, answer your wallet's call, and watch the drop arrive in
+                  the live console below.
+                </p>
 
-                <div className="mt-8 flex flex-wrap items-center gap-4">
+                <div className="mt-6 flex flex-col gap-3 sm:flex-row">
                   <button
                     type="button"
                     onClick={() => claimDeckRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
-                    className="touch-target inline-flex items-center justify-center border-2 border-orange bg-[rgba(221,122,31,0.08)] px-5 py-3 text-xs font-semibold uppercase tracking-[0.18em] text-orange shadow-[0_0_12px_rgba(221,122,31,0.22)] transition-all duration-200 hover:shadow-[0_0_16px_rgba(221,122,31,0.4)]"
+                    className="touch-target inline-flex items-center justify-center border-2 border-orange bg-[rgba(221,122,31,0.12)] px-5 py-3 text-xs font-semibold uppercase tracking-[0.18em] text-orange shadow-[0_0_12px_rgba(221,122,31,0.22)] transition-all duration-200 hover:bg-[rgba(221,122,31,0.18)] hover:shadow-[0_0_16px_rgba(221,122,31,0.36)]"
                   >
                     CLAIM YOUR $SUFFERING
                   </button>
                   <Link
                     to="/markets"
-                    className="touch-target inline-flex items-center justify-center border border-border-panel px-4 py-3 text-center text-xs font-semibold tracking-[0.14em] text-mint no-underline transition-all duration-200 hover:border-mint hover:shadow-[0_0_12px_rgba(202,245,222,0.15)]"
+                    className="touch-target inline-flex items-center justify-center border border-mint-dim bg-[rgba(202,245,222,0.08)] px-5 py-3 text-center text-xs font-semibold tracking-[0.18em] text-mint no-underline transition-all duration-200 hover:bg-[rgba(202,245,222,0.14)] hover:shadow-[0_0_14px_rgba(202,245,222,0.16)]"
                   >
                     RETURN TO THE ORCHESTRATOR
                   </Link>
                 </div>
-
-                <div className="mt-4 max-w-[38rem] text-[0.68rem] leading-6 tracking-[0.08em] text-text-dim">
-                  GAS SPONSORED ON SUI TESTNET // NO PAGE SWITCH AFTER CLICK // RESETS DAILY AT 00:00 UTC.
-                </div>
-              </div>
-
-              <div className="relative z-10 mt-10 grid gap-4 md:grid-cols-3">
-                {briefingItems.map((item, index) => (
-                  <div
-                    key={item}
-                    className="flex min-h-[8.4rem] flex-col justify-between border border-border-panel bg-[rgba(2,5,3,0.45)] p-4"
-                  >
-                    <span className="text-[0.55rem] tracking-[0.18em] text-text-dim">0{index + 1} // FIELD NOTE</span>
-                    <p className="m-0 text-[0.78rem] leading-6 tracking-[0.06em] text-text">{item}</p>
-                  </div>
-                ))}
               </div>
             </div>
 
-            <div className="airdrop-hero-shell relative min-h-[24rem] overflow-hidden border border-border-panel bg-bg-panel p-5 md:min-h-[34rem] md:p-6">
-              <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(202,245,222,0.1)_0%,rgba(202,245,222,0)_58%)]" />
-              <div className="relative z-10 flex h-full items-center justify-center p-4">
-                <div className="relative aspect-square w-full max-w-[33rem]">
-                  <div className="absolute inset-[5%] rounded-full border border-mint-dim/40" />
-                  <div className="absolute inset-[8%] rounded-full border border-mint-dim/30" />
-                  <div className="absolute inset-[13%] rounded-full border border-mint-dim/20" />
-
-                  <img
-                    src={airdropFigure}
-                    alt="SUFFER airdrop hero figure"
-                    className="absolute inset-[6%] h-[88%] w-[88%] object-contain drop-shadow-[0_0_24px_rgba(202,245,222,0.18)]"
-                  />
-
-                  <div className="airdrop-badge-float absolute bottom-[12%] right-[3%] w-[29%] md:bottom-[8%] md:right-[2%]">
-                    <div className="border border-mint-dim/50 bg-[rgba(2,5,3,0.78)] p-2 shadow-[0_0_28px_rgba(202,245,222,0.14)]">
-                      <img src={sufferCoin} alt="SUFFER token mark" className="h-auto w-full object-contain" />
-                    </div>
+            <div className="grid gap-4 md:grid-cols-3">
+              {landingCards.map((item, index) => (
+                <div
+                  key={item.label}
+                  className={`flex min-h-[18.5rem] flex-col overflow-hidden border bg-bg-panel p-4 md:min-h-[20rem] md:p-5 ${
+                    index === 1 ? "border-orange-dim shadow-[0_0_18px_rgba(221,122,31,0.08)]" : "border-border-panel"
+                  }`}
+                >
+                  <div
+                    className={`flex h-44 items-center justify-center border px-4 py-6 md:h-48 ${item.shellClassName}`}
+                  >
+                    <img
+                      src={item.art}
+                      alt={item.alt}
+                      className={`${item.artClassName} h-auto object-contain ${item.imageGlowClassName}`}
+                    />
                   </div>
-
-                  <div className="absolute left-[6%] top-[10%] border border-mint-dim/40 bg-[rgba(2,5,3,0.66)] px-3 py-2 text-[0.58rem] tracking-[0.16em] text-text-dim">
-                    HERO // PRIMARY FIELD
-                  </div>
-                  <div className="absolute bottom-[8%] left-[10%] border border-orange-dim/50 bg-[rgba(221,122,31,0.07)] px-3 py-2 text-[0.58rem] tracking-[0.16em] text-orange">
-                    SFR SEAL // SECONDARY ORBIT
-                  </div>
+                  <div className="mt-4 text-[0.67rem] font-semibold tracking-[0.13em] text-text-muted">{item.label}</div>
+                  <p className={`mt-3 m-0 text-[0.95rem] leading-7 tracking-[0.04em] ${item.textClassName}`}>{item.copy}</p>
                 </div>
-              </div>
+              ))}
             </div>
           </section>
 
@@ -501,8 +522,8 @@ export default function AirdropPage() {
             <div className="page-shell grid gap-6 py-6 lg:grid-cols-[1.1fr_0.9fr] lg:py-8">
               <div className="border border-border-panel bg-[rgba(2,5,3,0.5)] p-5 md:p-6">
                 <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-                  <div className="text-[0.58rem] tracking-[0.18em] text-text-dim">LIVE CLAIM CONSOLE</div>
-                  <div className="text-[0.58rem] tracking-[0.16em] text-orange">STAY ON THIS PAGE</div>
+                  <div className="text-[0.68rem] font-semibold tracking-[0.13em] text-text-muted">LIVE CLAIM CONSOLE</div>
+                  <div className="text-[0.68rem] font-semibold tracking-[0.13em] text-orange">STAY ON THIS PAGE</div>
                 </div>
 
                 <h3 className={`m-0 text-[1.4rem] font-bold uppercase tracking-[0.12em] ${consoleToneClass} md:text-[2rem]`}>
@@ -512,33 +533,31 @@ export default function AirdropPage() {
 
                 <div className="mt-6 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
                   <div className="border border-border-panel bg-bg-panel p-4">
-                    <div className="text-[0.55rem] tracking-[0.16em] text-text-dim">WALLET</div>
-                    <div className="mt-2 break-all text-[0.88rem] tracking-[0.08em] text-text">
-                      {account ? account.address : "CONNECT TO CLAIM"}
+                    <div className="text-[0.67rem] font-semibold tracking-[0.13em] text-text-muted">WALLET</div>
+                    <div className="mt-2 break-words text-[0.92rem] tracking-[0.06em] text-text">
+                      {walletValue}
                     </div>
                   </div>
                   <div className="border border-border-panel bg-bg-panel p-4">
-                    <div className="text-[0.55rem] tracking-[0.16em] text-text-dim">AVAILABLE NOW</div>
+                    <div className="text-[0.67rem] font-semibold tracking-[0.13em] text-text-muted">{claimAmountLabel}</div>
                     <div className="mt-2 text-[1rem] font-semibold tracking-[0.08em] text-mint">
                       {faucet ? `${formatClaimAmount(claimAmount)} ${COLLATERAL_SYMBOL}` : "SYNCING"}
                     </div>
-                    <div className="mt-2 text-[0.68rem] leading-5 text-text-dim">
-                      {accountClaim ? "Daily return amount for this wallet." : "Starter amount for a first claim."}
-                    </div>
+                    <div className="mt-2 text-[0.72rem] leading-5 text-text-dim">{claimAmountCopy}</div>
                   </div>
                   <div className="border border-border-panel bg-bg-panel p-4">
-                    <div className="text-[0.55rem] tracking-[0.16em] text-text-dim">GAS</div>
+                    <div className="text-[0.67rem] font-semibold tracking-[0.13em] text-text-muted">GAS</div>
                     <div className={`mt-2 text-[1rem] font-semibold tracking-[0.08em] ${relayReady ? "text-mint" : "text-orange"}`}>
                       {relayReady ? "SPONSORED" : relayConfigured ? "UNAVAILABLE" : "NOT CONFIGURED"}
                     </div>
-                    <div className="mt-2 text-[0.68rem] leading-5 text-text-dim">
-                      {relayReady ? "The relay pays gas for this claim." : "Claims fail closed until sponsorship is healthy."}
+                    <div className="mt-2 text-[0.72rem] leading-5 text-text-dim">
+                      {relayReady ? "The relay covers gas for this claim." : "Claims reopen here when sponsorship is healthy again."}
                     </div>
                   </div>
                   <div className="border border-border-panel bg-bg-panel p-4">
-                    <div className="text-[0.55rem] tracking-[0.16em] text-text-dim">NEXT RESET</div>
+                    <div className="text-[0.67rem] font-semibold tracking-[0.13em] text-text-muted">NEXT RESET</div>
                     <div className="mt-2 text-[1rem] font-semibold tracking-[0.08em] text-text">{nextClaimCountdown}</div>
-                    <div className="mt-2 text-[0.68rem] leading-5 text-text-dim">Resets at 00:00 UTC every day.</div>
+                    <div className="mt-2 text-[0.72rem] leading-5 text-text-dim">The daily claim returns at 00:00 UTC.</div>
                   </div>
                 </div>
 
@@ -590,40 +609,26 @@ export default function AirdropPage() {
                   ) : claimMode === "claiming" ? (
                     <div className="text-[0.78rem] uppercase tracking-[0.14em] text-tribe-b">Wallet approval in progress...</div>
                   ) : (
-                    <a
-                      href={PUBLIC_AIRDROP_URL}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="touch-target inline-flex min-h-12 items-center justify-center border border-border-panel px-5 py-3 text-xs font-semibold uppercase tracking-[0.14em] text-mint no-underline"
-                    >
-                      OPEN PUBLIC SITE
-                    </a>
+                    <div className="text-[0.78rem] uppercase tracking-[0.14em] text-orange">
+                      {claimMode === "loading" ? "SYNCING CLAIM CHANNEL" : "CLAIMS UNAVAILABLE RIGHT NOW"}
+                    </div>
                   )}
-
-                  <a
-                    href={PUBLIC_AIRDROP_URL}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-[0.7rem] uppercase tracking-[0.14em] text-text-dim"
-                  >
-                    lineagewar.xyz/airdrop
-                  </a>
                 </div>
 
                 {claimMode === "claiming" && (
                   <div className="mt-6 grid gap-3 md:grid-cols-3">
                     <div className="border border-tribe-b bg-[rgba(79,183,237,0.08)] p-4">
-                      <div className="text-[0.55rem] tracking-[0.16em] text-text-dim">1 // WALLET</div>
+                      <div className="text-[0.67rem] font-semibold tracking-[0.13em] text-text-muted">1 // WALLET</div>
                       <div className="mt-2 text-[0.82rem] tracking-[0.08em] text-tribe-b">APPROVE IN WALLET</div>
                     </div>
                     <div className="border border-tribe-b bg-[rgba(79,183,237,0.08)] p-4">
-                      <div className="text-[0.55rem] tracking-[0.16em] text-text-dim">2 // RELAY</div>
+                      <div className="text-[0.67rem] font-semibold tracking-[0.13em] text-text-muted">2 // RELAY</div>
                       <div className="mt-2 text-[0.82rem] tracking-[0.08em] text-tribe-b">
                         {claimStage === "wallet" ? "WAITING FOR SIGNATURE" : "SENDING SPONSORED CLAIM"}
                       </div>
                     </div>
                     <div className="border border-tribe-b bg-[rgba(79,183,237,0.08)] p-4">
-                      <div className="text-[0.55rem] tracking-[0.16em] text-text-dim">3 // CHAIN</div>
+                      <div className="text-[0.67rem] font-semibold tracking-[0.13em] text-text-muted">3 // CHAIN</div>
                       <div className="mt-2 text-[0.82rem] tracking-[0.08em] text-tribe-b">CONFIRMING ON-CHAIN</div>
                     </div>
                   </div>
@@ -638,19 +643,19 @@ export default function AirdropPage() {
                 {claimMode === "success" && successAmount !== null && (
                   <div className="mt-6 grid gap-3 md:grid-cols-3">
                     <div className="border border-border-panel bg-bg-panel p-4">
-                      <div className="text-[0.55rem] tracking-[0.16em] text-text-dim">CLAIMED</div>
+                      <div className="text-[0.67rem] font-semibold tracking-[0.13em] text-text-muted">CLAIMED</div>
                       <div className="mt-2 text-[1rem] font-semibold tracking-[0.08em] text-mint">
                         {formatClaimAmount(successAmount)} {COLLATERAL_SYMBOL}
                       </div>
                     </div>
                     <div className="border border-border-panel bg-bg-panel p-4">
-                      <div className="text-[0.55rem] tracking-[0.16em] text-text-dim">UPDATED BALANCE</div>
+                      <div className="text-[0.67rem] font-semibold tracking-[0.13em] text-text-muted">UPDATED BALANCE</div>
                       <div className="mt-2 text-[1rem] font-semibold tracking-[0.08em] text-text">
-                        {account ? `${formatCollateralAmount(balance.totalBalance, { minimumFractionDigits: 2 })} ${COLLATERAL_SYMBOL}` : "SYNC REQUIRED"}
+                        {account ? `${formatCollateralAmount(balance.totalBalance, { minimumFractionDigits: 2 })} ${COLLATERAL_SYMBOL}` : "CONNECT WALLET"}
                       </div>
                     </div>
                     <div className="border border-border-panel bg-bg-panel p-4">
-                      <div className="text-[0.55rem] tracking-[0.16em] text-text-dim">NEXT CLAIM</div>
+                      <div className="text-[0.67rem] font-semibold tracking-[0.13em] text-text-muted">NEXT CLAIM</div>
                       <div className="mt-2 text-[1rem] font-semibold tracking-[0.08em] text-text">{nextClaimCountdown}</div>
                     </div>
                   </div>
@@ -659,35 +664,35 @@ export default function AirdropPage() {
 
               <div className="flex flex-col gap-4">
                 <div className="border border-border-panel bg-[rgba(2,5,3,0.5)] p-5">
-                  <div className="mb-4 text-[0.58rem] tracking-[0.18em] text-text-dim">HOW IT WORKS</div>
+                  <div className="mb-4 text-[0.68rem] font-semibold tracking-[0.13em] text-text-muted">HOW IT WORKS</div>
                   <div className="space-y-4 text-[0.8rem] leading-6 tracking-[0.05em] text-text-muted">
                     <p className="m-0">
-                      Press the button, stay on this page, and approve in your wallet. There is no second claim route hiding behind the hero.
+                      This page is the claim gate. Connect your wallet, press claim, and approve when your wallet asks.
                     </p>
                     <p className="m-0">
-                      If you are eligible, the relay sponsors gas and the console confirms the claim inline. If you already claimed today, you land in cooldown instead of a raw contract error.
+                      First-time riders draw the starter amount. After that, the frontier resets at 00:00 UTC and the daily amount returns.
                     </p>
-                    <p className="m-0">Return after the next UTC reset for the daily claim amount.</p>
+                    <p className="m-0">When sponsorship is live, gas is covered and the result lands here on the same page.</p>
                   </div>
                 </div>
 
                 <div className="border border-border-panel bg-[rgba(2,5,3,0.5)] p-5">
-                  <div className="mb-4 text-[0.58rem] tracking-[0.18em] text-text-dim">YOUR SIGNALS</div>
+                  <div className="mb-4 text-[0.68rem] font-semibold tracking-[0.13em] text-text-muted">YOUR SIGNALS</div>
                   <div className="grid gap-3">
                     <div className="border border-border-panel bg-bg-panel p-4">
-                      <div className="text-[0.55rem] tracking-[0.16em] text-text-dim">CURRENT BALANCE</div>
+                      <div className="text-[0.67rem] font-semibold tracking-[0.13em] text-text-muted">CURRENT BALANCE</div>
                       <div className="mt-2 text-[0.95rem] font-semibold tracking-[0.08em] text-text">
-                        {account ? `${formatCollateralAmount(balance.totalBalance, { minimumFractionDigits: 2 })} ${COLLATERAL_SYMBOL}` : "CONNECT TO LOAD"}
+                        {account ? `${formatCollateralAmount(balance.totalBalance, { minimumFractionDigits: 2 })} ${COLLATERAL_SYMBOL}` : "CONNECT WALLET"}
                       </div>
                     </div>
                     <div className="border border-border-panel bg-bg-panel p-4">
-                      <div className="text-[0.55rem] tracking-[0.16em] text-text-dim">FAUCET STATS</div>
+                      <div className="text-[0.67rem] font-semibold tracking-[0.13em] text-text-muted">FAUCET STATS</div>
                       <div className="mt-2 text-[0.82rem] leading-6 tracking-[0.05em] text-text">
                         {faucet ? `${faucet.trackedWallets.toString()} wallets tracked // ${faucet.totalClaimCount.toString()} claims executed` : "SYNCING FAUCET METRICS"}
                       </div>
                     </div>
                     <div className="border border-border-panel bg-bg-panel p-4">
-                      <div className="text-[0.55rem] tracking-[0.16em] text-text-dim">LAST CLAIMER STATE</div>
+                      <div className="text-[0.67rem] font-semibold tracking-[0.13em] text-text-muted">LAST CLAIMER STATE</div>
                       <div className="mt-2 text-[0.82rem] leading-6 tracking-[0.05em] text-text">
                         {accountClaim
                           ? `Claim count: ${accountClaim.claimCount.toString()} // Total claimed: ${formatClaimAmount(accountClaim.totalClaimed)} ${COLLATERAL_SYMBOL}`

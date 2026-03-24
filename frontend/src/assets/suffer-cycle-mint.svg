@@ -1,0 +1,30 @@
+<svg width="256" height="256" viewBox="0 0 256 256" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <path
+    d="M128 48C167.765 48 200 80.2355 200 120V128"
+    stroke="#CAF5DE"
+    stroke-width="12"
+    stroke-linecap="square"
+  />
+  <path
+    d="M182 116L200 134L218 116"
+    stroke="#CAF5DE"
+    stroke-width="12"
+    stroke-linecap="square"
+    stroke-linejoin="miter"
+  />
+  <path
+    d="M128 208C88.2355 208 56 175.765 56 136V128"
+    stroke="#CAF5DE"
+    stroke-width="12"
+    stroke-linecap="square"
+  />
+  <path
+    d="M74 140L56 122L38 140"
+    stroke="#CAF5DE"
+    stroke-width="12"
+    stroke-linecap="square"
+    stroke-linejoin="miter"
+  />
+  <circle cx="128" cy="128" r="44" stroke="#CAF5DE" stroke-width="4" stroke-dasharray="1 13" />
+</svg>
+
