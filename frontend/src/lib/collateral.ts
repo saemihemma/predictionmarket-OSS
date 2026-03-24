@@ -38,10 +38,34 @@ export function formatCollateralAmount(
   return `${negative ? "-" : ""}${rendered}`;
 }
 
+export function normalizeCollateralInput(input: string): string {
+  return input.trim().replace(/[\s,_]/g, "");
+}
+
+export function formatCollateralInputAmount(amount: bigint): string {
+  const negative = amount < 0n;
+  const absolute = negative ? -amount : amount;
+  const whole = absolute / COLLATERAL_SCALE;
+  const fraction = absolute % COLLATERAL_SCALE;
+  const wholeString = whole.toString();
+
+  if (fraction === 0n) {
+    return `${negative ? "-" : ""}${wholeString}`;
+  }
+
+  const fractionString = fraction.toString().padStart(COLLATERAL_DECIMALS, "0").replace(/0+$/, "");
+
+  return `${negative ? "-" : ""}${wholeString}.${fractionString}`;
+}
+
 export function parseCollateralInput(input: string): bigint {
-  const trimmed = input.trim();
+  const trimmed = normalizeCollateralInput(input);
   if (!trimmed || trimmed === ".") {
     return 0n;
+  }
+
+  if (!/^\d*(\.\d*)?$/.test(trimmed)) {
+    throw new Error("Invalid collateral input");
   }
 
   const [wholeRaw = "0", fractionRaw = ""] = trimmed.split(".");

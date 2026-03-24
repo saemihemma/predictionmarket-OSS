@@ -10,29 +10,35 @@ export default function ProgressIndicator({ currentStep }: ProgressIndicatorProp
   const currentStepIndex = STEPS.indexOf(currentStep);
 
   return (
-    <div className="border-b border-border-panel px-6 py-1.5 flex gap-2 items-center text-[0.75rem] text-text-dim tracking-[0.06em] overflow-auto">
-      {STEPS.map((s, i) => (
-        <div key={s} className="flex items-center gap-2">
-          <div
-            className={`w-7 h-7 flex items-center justify-center font-semibold ${
-              s === currentStep
-                ? "border border-mint text-mint"
-                : "border border-border-panel text-text-dim"
-            }`}
-          >
-            {i + 1}
-          </div>
-          {i < STEPS.length - 1 && (
-            <div
-              className={`w-10 h-px ${
-                s === currentStep || STEPS.indexOf(s) < currentStepIndex
-                  ? "bg-mint"
-                  : "bg-border-panel"
-              }`}
-            />
-          )}
+    <div className="border-b border-border-panel">
+      <div className="page-shell mobile-scroll-row py-3">
+        <div className="flex min-w-max items-center gap-3 text-[0.75rem] tracking-[0.06em] text-text-dim">
+          {STEPS.map((stepName, index) => (
+            <div key={stepName} className="flex items-center gap-3">
+              <div className="flex items-center gap-2">
+                <div
+                  className={`flex h-8 w-8 items-center justify-center border font-semibold ${
+                    stepName === currentStep ? "border-mint text-mint" : "border-border-panel text-text-dim"
+                  }`}
+                >
+                  {index + 1}
+                </div>
+                <span className="hidden text-[0.6rem] tracking-[0.12em] text-text-dim md:block">
+                  {stepName.toUpperCase()}
+                </span>
+              </div>
+
+              {index < STEPS.length - 1 && (
+                <div
+                  className={`h-px w-10 ${
+                    stepName === currentStep || index < currentStepIndex ? "bg-mint" : "bg-border-panel"
+                  }`}
+                />
+              )}
+            </div>
+          ))}
         </div>
-      ))}
+      </div>
     </div>
   );
 }

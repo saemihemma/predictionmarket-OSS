@@ -8,7 +8,7 @@
 
 ## 1. What This Is
 
-**TL;DR:** A community-built prediction market on Sui (Move smart contracts), using the SUFFER (SFR) token. Markets are created, traded via CPMM AMM, then resolved through a 4-tier system. When disputed, tokenholders vote on outcomes (SDVM) for rewards or slashing.
+**TL;DR:** A community-built prediction market on Sui (Move smart contracts), using an external SUFFER (SFR) collateral family. Markets are created, traded via CPMM AMM, then resolved through a 4-tier system. When disputed, tokenholders vote on outcomes (SDVM) for rewards or slashing.
 
 ### The Stack
 

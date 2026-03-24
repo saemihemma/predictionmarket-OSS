@@ -15,20 +15,39 @@ interface TerminalPanelProps {
   noPadBottom?: boolean;
 }
 
-const accentBorderColor: Record<PanelAccent, string> = {
-  default: "var(--border-panel)",
-  tribeA: "var(--tribe-a)",
-  tribeB: "var(--tribe-b)",
-  contested: "var(--orange)",
-  neutral: "var(--neutral-state)",
-};
-
-const accentTitleColor: Record<PanelAccent, string> = {
-  default: "var(--mint)",
-  tribeA: "var(--tribe-a)",
-  tribeB: "var(--tribe-b)",
-  contested: "var(--orange)",
-  neutral: "var(--neutral-state)",
+const accentClasses: Record<
+  PanelAccent,
+  {
+    border: string;
+    header: string;
+    title: string;
+  }
+> = {
+  default: {
+    border: "border-border-panel",
+    header: "text-border-panel",
+    title: "text-mint",
+  },
+  tribeA: {
+    border: "border-tribe-a",
+    header: "text-tribe-a",
+    title: "text-tribe-a",
+  },
+  tribeB: {
+    border: "border-tribe-b",
+    header: "text-tribe-b",
+    title: "text-tribe-b",
+  },
+  contested: {
+    border: "border-orange",
+    header: "text-orange",
+    title: "text-orange",
+  },
+  neutral: {
+    border: "border-neutral-state",
+    header: "text-neutral-state",
+    title: "text-neutral-state",
+  },
 };
 
 /**
@@ -44,50 +63,21 @@ export default function TerminalPanel({
   titleRight,
   noPadBottom = false,
 }: TerminalPanelProps) {
-  const borderColor = accentBorderColor[accent];
-  const titleColor = accentTitleColor[accent];
+  const accentClassNames = accentClasses[accent];
 
   return (
-    <div
-      className={clsx("terminal-panel", className)}
-      style={{
-        borderColor,
-        display: "flex",
-        flexDirection: "column",
-        ...style,
-      }}
-    >
+    <div className={clsx("terminal-panel", accentClassNames.border, className)} style={style}>
       {title && (
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            padding: "0.45rem 0.85rem",
-            borderBottom: `1px solid ${borderColor}`,
-            background: "rgba(0,0,0,0.25)",
-          }}
-        >
-          <span
-            style={{
-              fontFamily: "IBM Plex Mono",
-              fontSize: "1rem",
-              fontWeight: 500,
-              letterSpacing: "0.12em",
-              textTransform: "uppercase",
-              color: titleColor,
-            }}
-          >
+        <div className={clsx("terminal-panel__header", accentClassNames.header)}>
+          <span className={clsx("terminal-panel__title", accentClassNames.title)}>
             {title}
           </span>
-          {titleRight && (
-            <span style={{ color: "var(--text-dim)", fontSize: "0.65rem" }}>
-              {titleRight}
-            </span>
-          )}
+          {titleRight && <span className="terminal-panel__title-right">{titleRight}</span>}
         </div>
       )}
-      <div style={{ padding: noPadBottom ? "0.85rem 0.85rem 0" : "0.85rem", flex: 1 }}>{children}</div>
+      <div className={clsx("terminal-panel__body", noPadBottom && "terminal-panel__body--no-pad-bottom")}>
+        {children}
+      </div>
     </div>
   );
 }

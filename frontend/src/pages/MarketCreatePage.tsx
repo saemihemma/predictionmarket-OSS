@@ -13,7 +13,13 @@ import {
   TrustTier,
 } from "../lib/market-types";
 import { buildCreateMarketTransaction } from "../lib/market-transactions";
-import { fetchCollateralCoins, formatCollateralAmount, parseCollateralInput } from "../lib/collateral";
+import {
+  fetchCollateralCoins,
+  formatCollateralAmount,
+  formatCollateralInputAmount,
+  normalizeCollateralInput,
+  parseCollateralInput,
+} from "../lib/collateral";
 import { COLLATERAL_SYMBOL } from "../lib/market-constants";
 import { getMarketTypePolicyId, hasLiveProtocolDeployment } from "../lib/protocol-config";
 import {
@@ -36,9 +42,11 @@ import BondStep from "./create/BondStep";
 import ReviewStep from "./create/ReviewStep";
 import ProgressIndicator from "./create/ProgressIndicator";
 import MarketPreview from "./create/MarketPreview";
+import { formatLocalDateTime, parseLocalDateTime } from "./create/DateTimePicker";
 
 type WizardStep = "title" | "description" | "outcomes" | "dates" | "resolution" | "bond" | "review";
 type PublicProfile = "sourceBackedCommunity" | "openCommunity";
+type StepValidationMap = Record<WizardStep, string[]>;
 
 const STEPS: WizardStep[] = ["title", "description", "outcomes", "dates", "resolution", "bond", "review"];
 
@@ -64,15 +72,34 @@ interface FormData {
   resolutionRules: string;
   creatorControls: boolean;
   creationBond: string;
-  resolutionBond: string;
-}
-
-function rawToInputString(amount: bigint): string {
-  return formatCollateralAmount(amount, { minimumFractionDigits: 0 });
 }
 
 function mapTrustTier(profile: PublicProfile): TrustTier {
   return profile === "sourceBackedCommunity" ? TrustTier.CREATOR_RESOLVED : TrustTier.EXPERIMENTAL;
+}
+
+function isValidHttpUrl(value: string): boolean {
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+function sanitizeWizardError(error: unknown): string {
+  const message = error instanceof Error ? error.message : "Transaction failed.";
+  const lowerMessage = message.toLowerCase();
+
+  if (
+    lowerMessage.includes("bigint") ||
+    lowerMessage.includes("invalid collateral input") ||
+    lowerMessage.includes("cannot convert")
+  ) {
+    return "Enter the creation bond as a number, for example 1000 or 1000.00.";
+  }
+
+  return message;
 }
 
 export default function MarketCreatePage() {
@@ -92,25 +119,18 @@ export default function MarketCreatePage() {
     resolutionSourceUri: "",
     resolutionRules: "",
     creatorControls: false,
-    creationBond: "0",
-    resolutionBond: "0",
+    creationBond: "",
   });
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!protocolConfig) {
-      return;
-    }
-
-    const trustTier = mapTrustTier(formData.trustTier);
-    const minCreationBond = rawToInputString(getCreationBondMinRawFromConfig(protocolConfig, trustTier));
-    const disputeBond = rawToInputString(getDisputeBondAmountRawFromConfig(protocolConfig));
-
+  const patchFormData = (patch: Partial<FormData>) => {
+    setSubmitError(null);
     setFormData((current) => ({
       ...current,
-      creationBond: current.creationBond === "0" ? minCreationBond : current.creationBond,
-      resolutionBond: disputeBond,
+      ...patch,
     }));
-  }, [protocolConfig, formData.trustTier]);
+  };
 
   const selectedTrustTier = mapTrustTier(formData.trustTier);
   const selectedResolutionClass = ResolutionClass.CREATOR_PROPOSED;
@@ -147,14 +167,210 @@ export default function MarketCreatePage() {
     );
   }, [policySourceType]);
 
+  const minimumCreationBondRaw = useMemo(
+    () => (protocolConfig ? getCreationBondMinRawFromConfig(protocolConfig, selectedTrustTier) : null),
+    [protocolConfig, selectedTrustTier],
+  );
+  const disputeBondRaw = useMemo(
+    () => (protocolConfig ? getDisputeBondAmountRawFromConfig(protocolConfig) : null),
+    [protocolConfig],
+  );
+  const minimumCreationBondInput = minimumCreationBondRaw ? formatCollateralInputAmount(minimumCreationBondRaw) : "";
+  const minimumCreationBondDisplay = minimumCreationBondRaw
+    ? formatCollateralAmount(minimumCreationBondRaw, { minimumFractionDigits: 0 })
+    : "--";
+  const resolutionBondDisplay = disputeBondRaw
+    ? formatCollateralAmount(disputeBondRaw, { withSymbol: true, minimumFractionDigits: 0 })
+    : `-- ${COLLATERAL_SYMBOL}`;
+
+  useEffect(() => {
+    if (!minimumCreationBondRaw) {
+      return;
+    }
+
+    setFormData((current) => {
+      const currentInput = current.creationBond.trim();
+      if (!currentInput) {
+        return {
+          ...current,
+          creationBond: formatCollateralInputAmount(minimumCreationBondRaw),
+        };
+      }
+
+      try {
+        const parsed = parseCollateralInput(currentInput);
+        if (parsed < minimumCreationBondRaw) {
+          return {
+            ...current,
+            creationBond: formatCollateralInputAmount(minimumCreationBondRaw),
+          };
+        }
+      } catch {
+        return current;
+      }
+
+      return current;
+    });
+  }, [minimumCreationBondRaw]);
+
   const currentStepIndex = STEPS.indexOf(step);
   const isFirstStep = currentStepIndex === 0;
   const isLastStep = currentStepIndex === STEPS.length - 1;
 
-  const handleNext = () => {
-    if (!isLastStep) {
-      setStep(STEPS[currentStepIndex + 1]);
+  const trimmedTitle = formData.title.trim();
+  const trimmedDescription = formData.description.trim();
+  const trimmedRules = formData.resolutionRules.trim();
+  const trimmedSourceUri = formData.resolutionSourceUri.trim();
+  const trimmedOutcomes = formData.outcomes.map((outcome) => outcome.trim());
+  const filledOutcomes = trimmedOutcomes.filter((outcome) => outcome.length > 0);
+  const closeDateValue = parseLocalDateTime(formData.closeDate);
+  const closeDateDisplay = formData.closeDate ? formatLocalDateTime(formData.closeDate) : "";
+  const normalizedCreationBondInput = normalizeCollateralInput(formData.creationBond);
+  const creationBondHasInvalidStructure =
+    normalizedCreationBondInput.length > 0 && !/^\d*(\.\d*)?$/.test(normalizedCreationBondInput);
+
+  let parsedCreationBond: bigint | null = null;
+  if (!creationBondHasInvalidStructure && normalizedCreationBondInput.length > 0) {
+    try {
+      parsedCreationBond = parseCollateralInput(normalizedCreationBondInput);
+    } catch {
+      parsedCreationBond = null;
     }
+  }
+
+  const creationBondDisplay =
+    parsedCreationBond !== null
+      ? formatCollateralAmount(parsedCreationBond, { withSymbol: true, minimumFractionDigits: 0 })
+      : normalizedCreationBondInput.length > 0
+        ? `Enter a valid bond amount in ${COLLATERAL_SYMBOL}`
+        : `Set a bond amount in ${COLLATERAL_SYMBOL}`;
+
+  const validationByStep = useMemo<StepValidationMap>(() => {
+    const titleMessages: string[] = [];
+    const descriptionMessages: string[] = [];
+    const outcomesMessages: string[] = [];
+    const datesMessages: string[] = [];
+    const resolutionMessages: string[] = [];
+    const bondMessages: string[] = [];
+
+    if (!trimmedTitle) {
+      titleMessages.push("Enter a market title.");
+    }
+
+    if (!trimmedDescription) {
+      descriptionMessages.push("Add a description so traders know what the market is about.");
+    }
+
+    if (formData.marketType === MarketType.BINARY) {
+      if (trimmedOutcomes.length !== 2 || trimmedOutcomes.some((outcome) => outcome.length === 0)) {
+        outcomesMessages.push("Binary markets need two non-empty outcomes.");
+      }
+    } else if (formData.marketType === MarketType.CATEGORICAL) {
+      if (filledOutcomes.length < 3) {
+        outcomesMessages.push("Multiple choice markets need at least three outcomes.");
+      }
+      if (trimmedOutcomes.length > 8) {
+        outcomesMessages.push("Multiple choice markets can have up to eight outcomes.");
+      }
+      if (trimmedOutcomes.some((outcome) => outcome.length === 0)) {
+        outcomesMessages.push("Fill in each outcome or remove the empty ones before continuing.");
+      }
+    }
+
+    if (!formData.closeDate) {
+      datesMessages.push("Choose when trading should close.");
+    } else if (!closeDateValue) {
+      datesMessages.push("Pick a valid close date and time.");
+    } else if (closeDateValue.getTime() <= Date.now()) {
+      datesMessages.push("Choose a close date in the future.");
+    }
+
+    if (policyLoading) {
+      resolutionMessages.push("Live market policy is still loading.");
+    } else if (!selectedPolicy || !selectedPolicy.active) {
+      resolutionMessages.push("The selected market policy is not live yet.");
+    }
+    if (!trimmedRules) {
+      resolutionMessages.push("Add resolution rules so the community can settle the market.");
+    }
+    if (formData.trustTier === "sourceBackedCommunity" && !trimmedSourceUri) {
+      resolutionMessages.push("Source-backed community markets require a primary source URL.");
+    }
+    if (trimmedSourceUri && !isValidHttpUrl(trimmedSourceUri)) {
+      resolutionMessages.push("Enter a valid source URL starting with http:// or https://.");
+    }
+
+    if (configLoading || !minimumCreationBondRaw) {
+      bondMessages.push("Live protocol economics are still syncing.");
+    }
+    if (!normalizedCreationBondInput) {
+      bondMessages.push("Enter the creation bond as a number.");
+    } else if (creationBondHasInvalidStructure || parsedCreationBond === null) {
+      bondMessages.push("Enter the creation bond as a number, for example 1000 or 1000.00.");
+    } else if (minimumCreationBondRaw && parsedCreationBond < minimumCreationBondRaw) {
+      bondMessages.push(`Creation bond must be at least ${minimumCreationBondDisplay} ${COLLATERAL_SYMBOL}.`);
+    }
+
+    const reviewMessages = [
+      ...titleMessages,
+      ...descriptionMessages,
+      ...outcomesMessages,
+      ...datesMessages,
+      ...resolutionMessages,
+      ...bondMessages,
+    ];
+
+    if (!account) {
+      reviewMessages.push("Connect your wallet to submit the market.");
+    }
+    if (!hasLiveProtocolDeployment()) {
+      reviewMessages.push("Live protocol deployment details are not available yet.");
+    }
+
+    return {
+      title: titleMessages,
+      description: descriptionMessages,
+      outcomes: outcomesMessages,
+      dates: datesMessages,
+      resolution: resolutionMessages,
+      bond: bondMessages,
+      review: reviewMessages,
+    };
+  }, [
+    account,
+    closeDateValue,
+    configLoading,
+    creationBondHasInvalidStructure,
+    filledOutcomes.length,
+    formData.closeDate,
+    formData.marketType,
+    formData.trustTier,
+    hasLiveProtocolDeployment,
+    minimumCreationBondDisplay,
+    minimumCreationBondRaw,
+    normalizedCreationBondInput,
+    parsedCreationBond,
+    policyLoading,
+    selectedPolicy,
+    trimmedDescription,
+    trimmedOutcomes,
+    trimmedRules,
+    trimmedSourceUri,
+    trimmedTitle,
+  ]);
+
+  const currentStepMessages = validationByStep[step];
+  const firstInvalidStep =
+    STEPS.find((candidate) => candidate !== "review" && validationByStep[candidate].length > 0) ?? null;
+  const canAdvance = !isLastStep && currentStepMessages.length === 0 && !submitting;
+  const canSubmit = validationByStep.review.length === 0 && !submitting;
+
+  const handleNext = () => {
+    if (!canAdvance) {
+      return;
+    }
+
+    setStep(STEPS[currentStepIndex + 1]);
   };
 
   const handlePrev = () => {
@@ -163,36 +379,28 @@ export default function MarketCreatePage() {
     }
   };
 
-  const [submitting, setSubmitting] = useState(false);
-  const [submitError, setSubmitError] = useState<string | null>(null);
-
   const handleSubmit = async () => {
+    if (validationByStep.review.length > 0 || !parsedCreationBond || !closeDateValue) {
+      setSubmitError("Finish the remaining required fields before submitting.");
+      if (firstInvalidStep) {
+        setStep(firstInvalidStep);
+      }
+      return;
+    }
     if (!account) {
-      setSubmitError("Connect wallet first.");
+      setSubmitError("Connect your wallet to submit the market.");
       return;
     }
     if (!protocolConfig) {
-      setSubmitError("Live protocol config is still syncing.");
+      setSubmitError("Live protocol economics are still syncing.");
       return;
     }
     if (!hasLiveProtocolDeployment()) {
-      setSubmitError("Protocol manifest is not bootstrapped yet.");
+      setSubmitError("Live protocol deployment details are not available yet.");
       return;
     }
     if (!selectedPolicy || !selectedPolicy.active) {
-      setSubmitError("Selected market policy is not live yet.");
-      return;
-    }
-    if (!formData.title.trim() || !formData.description.trim()) {
-      setSubmitError("Title and description are required.");
-      return;
-    }
-    if (!formData.resolutionRules.trim()) {
-      setSubmitError("Resolution rules are required for public beta markets.");
-      return;
-    }
-    if (formData.trustTier === "sourceBackedCommunity" && !formData.resolutionSourceUri.trim()) {
-      setSubmitError("Source-backed community markets require a source URL.");
+      setSubmitError("The selected market policy is not live yet.");
       return;
     }
 
@@ -200,31 +408,27 @@ export default function MarketCreatePage() {
     setSubmitError(null);
 
     try {
-      const closeMs = formData.closeDate
-        ? BigInt(new Date(formData.closeDate).getTime())
-        : BigInt(Date.now() + 7 * 86400000);
-      const bondAmount = parseCollateralInput(formData.creationBond);
+      const closeMs = BigInt(closeDateValue.getTime());
       const inventory = await fetchCollateralCoins(account.address);
 
-      if (inventory.totalBalance < bondAmount) {
+      if (inventory.totalBalance < parsedCreationBond) {
         setSubmitError(`Not enough ${COLLATERAL_SYMBOL} for the creation bond.`);
         return;
       }
 
-      const trustTier = mapTrustTier(formData.trustTier);
       const tx = buildCreateMarketTransaction({
-        title: formData.title,
-        description: formData.description,
-        resolutionText: formData.resolutionRules,
+        title: trimmedTitle,
+        description: trimmedDescription,
+        resolutionText: trimmedRules,
         marketType: formData.marketType,
-        trustTier,
+        trustTier: selectedTrustTier,
         resolutionClass: selectedResolutionClass,
-        outcomeCount: formData.outcomes.length,
-        outcomeLabels: formData.outcomes,
+        outcomeCount: filledOutcomes.length,
+        outcomeLabels: filledOutcomes,
         closeTimeMs: closeMs,
         resolveDeadlineMs: closeMs + BigInt(72 * 60 * 60 * 1000),
         sourceClass: selectedPolicy.requiredSourceClass,
-        sourceUri: formData.resolutionSourceUri,
+        sourceUri: trimmedSourceUri,
         sourceDescription:
           formData.trustTier === "sourceBackedCommunity"
             ? `${formData.resolutionSourceType} / source-backed community`
@@ -240,12 +444,12 @@ export default function MarketCreatePage() {
         creatorIsSourceController: formData.creatorControls,
         disclosureText: formData.creatorControls ? "Creator disclosed source influence." : "",
         bondCoinIds: inventory.coinObjectIds,
-        bondAmount,
+        bondAmount: parsedCreationBond,
       });
 
       await executeSponsoredTx(tx);
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : "Transaction failed";
+      const message = sanitizeWizardError(error);
       setSubmitError(message);
       console.error("Market creation failed:", error);
     } finally {
@@ -276,14 +480,12 @@ export default function MarketCreatePage() {
                   </div>
                 )}
 
-                {step === "title" && (
-                  <TitleStep title={formData.title} onChange={(value) => setFormData({ ...formData, title: value })} />
-                )}
+                {step === "title" && <TitleStep title={formData.title} onChange={(value) => patchFormData({ title: value })} />}
 
                 {step === "description" && (
                   <DescriptionStep
                     description={formData.description}
-                    onChange={(value) => setFormData({ ...formData, description: value })}
+                    onChange={(value) => patchFormData({ description: value })}
                   />
                 )}
 
@@ -292,18 +494,17 @@ export default function MarketCreatePage() {
                     marketType={formData.marketType}
                     outcomes={formData.outcomes}
                     onMarketTypeChange={(type, outcomes) =>
-                      setFormData({
-                        ...formData,
+                      patchFormData({
                         marketType: type,
                         outcomes,
                       })
                     }
-                    onOutcomesChange={(outcomes) => setFormData({ ...formData, outcomes })}
+                    onOutcomesChange={(outcomes) => patchFormData({ outcomes })}
                   />
                 )}
 
                 {step === "dates" && (
-                  <DatesStep closeDate={formData.closeDate} onChange={(value) => setFormData({ ...formData, closeDate: value })} />
+                  <DatesStep closeDate={formData.closeDate} onChange={(value) => patchFormData({ closeDate: value })} />
                 )}
 
                 {step === "resolution" && (
@@ -315,27 +516,11 @@ export default function MarketCreatePage() {
                     creatorControls={formData.creatorControls}
                     allowedSourceTypes={policySourceType ? [policySourceType] : undefined}
                     requiredEvidenceLabel={policyEvidenceLabel}
-                    onTrustTierChange={(tier) => {
-                      if (!protocolConfig) {
-                        setFormData({
-                          ...formData,
-                          trustTier: tier,
-                        });
-                        return;
-                      }
-
-                      const mappedTier = mapTrustTier(tier);
-                      setFormData({
-                        ...formData,
-                        trustTier: tier,
-                        creationBond: rawToInputString(getCreationBondMinRawFromConfig(protocolConfig, mappedTier)),
-                        resolutionBond: rawToInputString(getDisputeBondAmountRawFromConfig(protocolConfig)),
-                      });
-                    }}
-                    onSourceTypeChange={(value) => setFormData({ ...formData, resolutionSourceType: value })}
-                    onSourceUriChange={(value) => setFormData({ ...formData, resolutionSourceUri: value })}
-                    onRulesChange={(value) => setFormData({ ...formData, resolutionRules: value })}
-                    onCreatorControlsChange={(value) => setFormData({ ...formData, creatorControls: value })}
+                    onTrustTierChange={(tier) => patchFormData({ trustTier: tier })}
+                    onSourceTypeChange={(value) => patchFormData({ resolutionSourceType: value })}
+                    onSourceUriChange={(value) => patchFormData({ resolutionSourceUri: value })}
+                    onRulesChange={(value) => patchFormData({ resolutionRules: value })}
+                    onCreatorControlsChange={(value) => patchFormData({ creatorControls: value })}
                   />
                 )}
 
@@ -343,26 +528,37 @@ export default function MarketCreatePage() {
                   <BondStep
                     trustTier={formData.trustTier}
                     creationBond={formData.creationBond}
-                    resolutionBond={formData.resolutionBond}
-                    runtimeConfig={protocolConfig ?? null}
-                    onCreationBondChange={(value) => setFormData({ ...formData, creationBond: value })}
+                    minimumCreationBond={minimumCreationBondInput}
+                    resolutionBond={resolutionBondDisplay}
+                    onCreationBondChange={(value) => patchFormData({ creationBond: normalizeCollateralInput(value) })}
                   />
                 )}
 
                 {step === "review" && (
                   <ReviewStep
-                    title={formData.title}
-                    description={formData.description}
+                    title={trimmedTitle}
+                    description={trimmedDescription}
                     marketType={formData.marketType}
                     trustTier={formData.trustTier}
-                    outcomes={formData.outcomes}
-                    closeDate={formData.closeDate}
+                    outcomes={filledOutcomes}
+                    closeDate={closeDateDisplay}
                     resolutionSourceType={formData.resolutionSourceType}
-                    resolutionSourceUri={formData.resolutionSourceUri}
+                    resolutionSourceUri={trimmedSourceUri}
                     creatorControls={formData.creatorControls}
-                    creationBond={formData.creationBond}
-                    resolutionBond={formData.resolutionBond}
+                    creationBond={creationBondDisplay}
+                    resolutionBond={resolutionBondDisplay}
                   />
+                )}
+
+                {currentStepMessages.length > 0 && (
+                  <div className="border border-orange-dim bg-[rgba(221,122,31,0.08)] px-4 py-3 text-[0.72rem] tracking-[0.08em] text-orange">
+                    <div className="mb-2 font-semibold tracking-[0.12em] text-orange">BEFORE YOU CONTINUE</div>
+                    <ul className="list-disc space-y-1 pl-4">
+                      {currentStepMessages.map((message) => (
+                        <li key={message}>{message}</li>
+                      ))}
+                    </ul>
+                  </div>
                 )}
               </div>
             </TerminalPanel>
@@ -383,9 +579,9 @@ export default function MarketCreatePage() {
               {isLastStep ? (
                 <button
                   onClick={handleSubmit}
-                  disabled={!formData.title || submitting || configLoading}
+                  disabled={!canSubmit}
                   className={`touch-target flex-1 border px-4 py-3 font-mono text-xs font-semibold tracking-[0.08em] transition-all duration-200 ${
-                    formData.title && !submitting && !configLoading
+                    canSubmit
                       ? "cursor-pointer border-mint-dim bg-[rgba(202,245,222,0.15)] text-mint"
                       : "cursor-not-allowed border-border-inactive bg-[rgba(0,0,0,0.3)] text-text-dim"
                   }`}
@@ -395,7 +591,12 @@ export default function MarketCreatePage() {
               ) : (
                 <button
                   onClick={handleNext}
-                  className="touch-target flex-1 border border-mint-dim bg-[rgba(202,245,222,0.12)] px-4 py-3 font-mono text-xs font-semibold tracking-[0.08em] text-mint transition-all duration-200 hover:bg-[rgba(202,245,222,0.2)]"
+                  disabled={!canAdvance}
+                  className={`touch-target flex-1 border px-4 py-3 font-mono text-xs font-semibold tracking-[0.08em] transition-all duration-200 ${
+                    canAdvance
+                      ? "cursor-pointer border-mint-dim bg-[rgba(202,245,222,0.12)] text-mint hover:bg-[rgba(202,245,222,0.2)]"
+                      : "cursor-not-allowed border-border-inactive bg-[rgba(0,0,0,0.3)] text-text-dim"
+                  }`}
                 >
                   NEXT &gt;
                 </button>
@@ -414,11 +615,11 @@ export default function MarketCreatePage() {
               title={formData.title}
               description={formData.description}
               marketType={formData.marketType}
-              closeDate={formData.closeDate}
+              closeDate={closeDateDisplay}
               trustTier={formData.trustTier}
-              outcomes={formData.outcomes}
+              outcomes={filledOutcomes}
               resolutionSourceType={formData.resolutionSourceType}
-              creationBond={formData.creationBond}
+              creationBond={creationBondDisplay}
             />
           </div>
         </main>

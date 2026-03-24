@@ -446,7 +446,7 @@ export interface SDVMData {
 
 ### useMarketData Hooks
 
-All data flows through hooks in `/frontend/src/hooks/useMarketData.ts`. **Pages NEVER import mock-markets.ts directly.**
+All shipped market and portfolio reads flow through hooks in `/frontend/src/hooks/useMarketData.ts` and the shared transport in `/frontend/src/lib/client.ts`.
 
 #### useMarketData(id: string)
 Fetch a single market by ID.
@@ -459,9 +459,8 @@ const { market, isLoading, error } = useMarketData("market-001");
 //   - Enriched with calculated fields:
 //     - creatorPriorityDeadlineMs: closeTimeMs + 24h
 //     - timeUntilCommunityCanProposeMs: milliseconds until community can propose
-//     - resolveDeadlineMs: closeTimeMs + 72h
-// isLoading: boolean (always false for mock data currently)
-// error: null (no errors for mock data)
+// isLoading: boolean while live chain data is loading
+// error: Error | null when the live transport fails
 ```
 
 #### useAllMarkets()
@@ -471,9 +470,9 @@ Fetch all markets for index/listing pages.
 const { markets, isLoading, error } = useAllMarkets();
 
 // Returns:
-// markets: Market[] (all markets from mock-markets.ts)
+// markets: Market[] discovered from MarketCreatedEvent and loaded by object ID
 // isLoading: boolean
-// error: null
+// error: Error | null
 ```
 
 #### useMarketStats()
@@ -509,12 +508,12 @@ const { positions, isLoading, error } = usePortfolio();
 
 ---
 
-### Migration from Mock to Live RPC
+### Live Read Path
 
-When switching to on-chain RPC:
-1. Replace `mockMarkets` with `suiClient.getOwnedObjects()` query
-2. Map on-chain Market struct fields to our Market interface (same field names)
-3. Replace mock positions with SUI RPC query on user's account
+Current live read flow:
+1. `listMarketIds()` pages `MarketCreatedEvent` through Sui GraphQL.
+2. `getObject()` / `getObjects()` normalize object JSON into the existing parser shape.
+3. `listOwnedObjects()` and `listCoins()` power portfolio and collateral reads.
 4. **Pages do NOT change** — they only consume hook interfaces
 
 ---
@@ -762,7 +761,7 @@ wc -l src/pages/MarketDetailPage.tsx
 - [ ] Grep for existing instances (don't duplicate)
 - [ ] Use inline styles with `var()` (not Tailwind)
 - [ ] Import types from `market-types.ts` (not invented types)
-- [ ] Use data hooks in pages (not mock-markets.ts imports)
+- [ ] Use data hooks in pages (not transport calls in components)
 - [ ] Verify file stays under 500 lines (or plan split)
 
 ### Common Mistakes to Avoid:

@@ -2,202 +2,238 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { outcomeProbabilityBps } from "../lib/amm";
 import { MarketState } from "../lib/market-types";
-import { useAllMarkets, useMarketStats } from "../hooks/useMarketData";
+import { useAllMarkets } from "../hooks/useMarketData";
+import { formatCollateralAmount } from "../lib/collateral";
+import { COLLATERAL_SYMBOL } from "../lib/market-constants";
 import Footer from "../components/ui/Footer";
 import PageHeader from "../components/ui/PageHeader";
 import TerminalScreen from "../components/terminal/TerminalScreen";
 
+type FilterTab =
+  | "all"
+  | "open"
+  | "closing"
+  | "needs-proposal"
+  | "proposal-pending"
+  | "disputed"
+  | "resolved";
+
+const FILTER_TABS: FilterTab[] = [
+  "all",
+  "open",
+  "closing",
+  "proposal-pending",
+  "needs-proposal",
+  "disputed",
+  "resolved",
+];
+
+function getFilterLabel(tab: FilterTab) {
+  if (tab === "needs-proposal") return "NEEDS PROPOSAL";
+  if (tab === "proposal-pending") return "DISPUTE WINDOW";
+  return tab.toUpperCase();
+}
+
 export default function MarketsIndexPage() {
-
-  // F7: Use hooks instead of direct mock imports
-  const { markets: mockMarkets } = useAllMarkets();
-  const { totalMarkets, totalVolume, activeTraders } = useMarketStats();
-
-  // Derive display data from shared markets
-  const MOCK_MARKETS = mockMarkets.map(m => {
-  const probs = outcomeProbabilityBps(m.outcomeQuantities);
-  const yes = Math.round(Number(probs[0]) / 100);
-  const timeLeft = m.closeTimeMs - Date.now();
-  const days = Math.max(0, Math.ceil(timeLeft / (24 * 60 * 60 * 1000)));
-  const hours = Math.max(0, Math.ceil((timeLeft % (24 * 60 * 60 * 1000)) / (60 * 60 * 1000)));
-  return {
-    id: m.id,
-    title: m.title,
-    yes,
-    volume: `${Number(m.totalCollateral).toLocaleString()} SFR`,
-    closes: days > 0 ? `${days}d ${hours}h` : timeLeft > 0 ? `${hours}h` : "Closed",
-    state: m.state,
-    closeTimeMs: m.closeTimeMs,
-    proposal: m.proposal,
-  };
-});
-
-/* ── Hover rule: each element brightens in its OWN accent color ──
-   - Mint elements (cards, CREATE MARKET, CONNECT WALLET) → brighter mint glow
-   - Orange elements ($SUFFER AIRDROP) → brighter orange glow
-   No mixing. Consistent. */
-
-const CARD_HEIGHT = 200; // Fixed height — room for title + badge tag + probability + footer
-
-type FilterTab = "all" | "open" | "closing" | "needs-proposal" | "proposal-pending" | "disputed" | "resolved";
-
+  const { markets, isLoading, error } = useAllMarkets();
   const [search, setSearch] = useState("");
   const [filterTab, setFilterTab] = useState<FilterTab>("all");
+  const totalMarkets = markets.length;
+  const totalVolume = formatCollateralAmount(markets.reduce((sum, market) => sum + market.totalCollateral, 0n));
+  const activeTraders = new Set(markets.map((market) => market.creator).filter(Boolean)).size;
 
-  const filtered = MOCK_MARKETS.filter(m => {
-    // Search filter
-    if (!m.title.toLowerCase().includes(search.toLowerCase())) {
+  const displayMarkets = markets.map((market) => {
+    const probabilities = outcomeProbabilityBps(market.outcomeQuantities);
+    const yes = Math.round(Number(probabilities[0]) / 100);
+    const timeLeft = market.closeTimeMs - Date.now();
+    const days = Math.max(0, Math.ceil(timeLeft / (24 * 60 * 60 * 1000)));
+    const hours = Math.max(0, Math.ceil((timeLeft % (24 * 60 * 60 * 1000)) / (60 * 60 * 1000)));
+
+    return {
+      id: market.id,
+      title: market.title,
+      yes,
+      volume: formatCollateralAmount(market.totalCollateral, { withSymbol: true }),
+      closes: days > 0 ? `${days}d ${hours}h` : timeLeft > 0 ? `${hours}h` : "Closed",
+      state: market.state,
+      closeTimeMs: market.closeTimeMs,
+      proposal: market.proposal,
+    };
+  });
+
+  const filteredMarkets = displayMarkets.filter((market) => {
+    if (!market.title.toLowerCase().includes(search.toLowerCase())) {
       return false;
     }
 
-    // Tab filter
-    if (filterTab === "all") {
-      return true;
-    } else if (filterTab === "open") {
-      return m.state === MarketState.OPEN;
-    } else if (filterTab === "closing") {
-      return m.state === MarketState.OPEN && (m.closeTimeMs - Date.now()) < 12 * 60 * 60 * 1000;
-    } else if (filterTab === "needs-proposal") {
-      return m.state === MarketState.CLOSED && !m.proposal;
-    } else if (filterTab === "proposal-pending") {
-      return m.state === MarketState.RESOLUTION_PENDING;
-    } else if (filterTab === "resolved") {
-      return m.state === MarketState.RESOLVED || m.state === MarketState.INVALID;
-    } else if (filterTab === "disputed") {
-      return m.state === MarketState.DISPUTED;
+    if (filterTab === "all") return true;
+    if (filterTab === "open") return market.state === MarketState.OPEN;
+    if (filterTab === "closing") {
+      return market.state === MarketState.OPEN && market.closeTimeMs - Date.now() < 12 * 60 * 60 * 1000;
     }
+    if (filterTab === "needs-proposal") {
+      return market.state === MarketState.CLOSED && !market.proposal;
+    }
+    if (filterTab === "proposal-pending") {
+      return market.state === MarketState.RESOLUTION_PENDING;
+    }
+    if (filterTab === "resolved") {
+      return market.state === MarketState.RESOLVED || market.state === MarketState.INVALID;
+    }
+    if (filterTab === "disputed") {
+      return market.state === MarketState.DISPUTED;
+    }
+
     return true;
   });
+
+  const hasActiveFilters = filterTab !== "all" || search.trim().length > 0;
 
   return (
     <TerminalScreen>
       <div className="min-h-screen flex flex-col">
-
-      <PageHeader actions={<>
-        <Link
-          to="/markets/create"
-          className="no-underline text-mint text-xs font-semibold tracking-[0.12em] border border-border-panel px-4 py-2 transition-all duration-200 hover:border-mint hover:shadow-[0_0_12px_rgba(202,245,222,0.15)]"
-        >
-          + CREATE MARKET
-        </Link>
-        <button className="bg-transparent border-2 border-orange text-orange text-xs font-semibold tracking-[0.1em] px-4 py-2 cursor-pointer shadow-[0_0_8px_rgba(221,122,31,0.3)] transition-all duration-200 hover:shadow-[0_0_16px_rgba(221,122,31,0.5)]">
-          $SUFFER AIRDROP
-        </button>
-      </>} />
-
-      {/* Stats Bar */}
-      <div className="flex gap-8 px-8 py-3 border-b border-border-grid text-xs text-text tracking-[0.08em] overflow-x-hidden">
-        <span>MARKETS: <span className="text-mint font-semibold">{totalMarkets}</span></span>
-        <span className="border-l border-border-panel pl-8">24H VOLUME: <span className="text-mint font-semibold">{totalVolume} SFR</span></span>
-        <span className="border-l border-border-panel pl-8">ACTIVE TRADERS: <span className="text-mint font-semibold">{activeTraders}</span></span>
-        <span className="border-l border-border-panel pl-8">NETWORK: <span className="text-tribe-b font-semibold">TESTNET</span></span>
-      </div>
-
-      {/* Main Content */}
-      <main className="px-8 py-6 max-w-[1400px] mx-auto overflow-x-hidden">
-        {/* Filter Tabs */}
-        <div className="flex gap-2 mb-4 border-b border-border-panel pb-3 overflow-x-auto">
-          {(["all", "open", "closing", "proposal-pending", "needs-proposal", "disputed", "resolved"] as const).map((tab) => (
-            <button
-              key={tab}
-              onClick={() => setFilterTab(tab)}
-              className={`px-4 py-2 text-xs font-semibold tracking-[0.1em] transition-all duration-200 ease-in-out uppercase whitespace-nowrap cursor-pointer ${
-                filterTab === tab
-                  ? "bg-[rgba(202,245,222,0.12)] text-mint border border-mint-dim"
-                  : "bg-transparent text-text-muted border border-border-panel"
-              }`}
-            >
-              {tab === "needs-proposal" ? "NEEDS PROPOSAL" : tab === "proposal-pending" ? "DISPUTE WINDOW" : tab.toUpperCase()}
-            </button>
-          ))}
-        </div>
-
-        {/* Search */}
-        <input
-          type="text"
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-          placeholder="SEARCH MARKETS..."
-          className="w-full bg-bg-panel border border-border-panel text-mint px-3 py-2 text-xs tracking-[0.08em] mb-6 outline-none transition-all duration-200 ease-in-out"
+        <PageHeader
+          actions={
+            <>
+              <Link
+                to="/markets/create"
+                className="touch-target inline-flex min-h-11 items-center justify-center border border-border-panel px-4 py-2 text-xs font-semibold tracking-[0.12em] text-mint no-underline transition-all duration-200 hover:border-mint hover:shadow-[0_0_12px_rgba(202,245,222,0.15)]"
+              >
+                + CREATE MARKET
+              </Link>
+              <Link
+                to="/airdrop"
+                className="touch-target inline-flex min-h-11 items-center justify-center border-2 border-orange px-4 py-2 text-xs font-semibold tracking-[0.1em] text-orange no-underline shadow-[0_0_8px_rgba(221,122,31,0.3)] transition-all duration-200 hover:shadow-[0_0_16px_rgba(221,122,31,0.5)]"
+              >
+                $SUFFER AIRDROP
+              </Link>
+            </>
+          }
         />
 
-        {/* Market Grid — all cards same height */}
-        <div className="grid grid-cols-[repeat(auto-fill,minmax(380px,1fr))] gap-4">
-          {filtered.map(market => (
-            <Link
-              key={market.id}
-              to={`/markets/${market.id}`}
-              className="no-underline text-inherit"
-            >
-              <div className="bg-bg-panel border border-border-panel p-6 cursor-pointer transition-all duration-200 ease-in-out h-[200px] flex flex-col justify-between relative hover:border-mint-dim hover:shadow-[0_0_12px_rgba(202,245,222,0.08)]">
-                {/* Status Badge — top right corner tag */}
-                {market.state === MarketState.OPEN && (market.closeTimeMs - Date.now()) < 12 * 60 * 60 * 1000 && (
-                  <div className="absolute top-3 right-3 text-[0.5rem] font-bold tracking-[0.1em] text-orange bg-[rgba(221,122,31,0.1)] border border-orange-dim px-2 py-1 max-w-[4.5rem]">
-                    CLOSING
-                  </div>
-                )}
-                {market.state === MarketState.CLOSED && !market.proposal && (
-                  <div className="absolute top-3 right-3 text-[0.5rem] font-bold tracking-[0.1em] text-orange bg-[rgba(221,122,31,0.1)] border border-orange-dim px-2 py-1 max-w-[4.5rem]">
-                    NEEDS PROPOSAL
-                  </div>
-                )}
-                {market.state === MarketState.RESOLUTION_PENDING && (
-                  <div className="absolute top-3 right-3 text-[0.5rem] font-bold tracking-[0.1em] text-mint bg-[rgba(202,245,222,0.1)] border border-mint-dim px-2 py-1 max-w-[4.5rem]">
-                    DISPUTE WINDOW
-                  </div>
-                )}
-                {market.state === MarketState.DISPUTED && (
-                  <div className="absolute top-3 right-3 text-[0.5rem] font-bold tracking-[0.1em] text-yellow bg-[rgba(242,201,76,0.1)] border border-yellow-dim px-2 py-1 max-w-[4.5rem]">
-                    DISPUTED
-                  </div>
-                )}
-                {(market.state === MarketState.RESOLVED || market.state === MarketState.INVALID) && (
-                  <div className="absolute top-3 right-3 text-[0.5rem] font-bold tracking-[0.1em] text-mint bg-[rgba(202,245,222,0.1)] border border-mint-dim px-2 py-1 max-w-[4.5rem]">
-                    RESOLVED
-                  </div>
-                )}
-
-                {/* Title — clamped to 2 lines */}
-                <div
-                  className="text-sm font-semibold tracking-[0.04em] leading-6 text-mint overflow-hidden line-clamp-2"
-                  style={{
-                    paddingRight: (market.state !== MarketState.OPEN || market.state === MarketState.CLOSED) ? "5rem" : 0,
-                  }}
-                >
-                  {market.title}
-                </div>
-
-                {/* Bottom section — probability + footer */}
-                <div>
-                  {/* Probability Bar */}
-                  <div className="mb-3">
-                    <div className="flex justify-between text-[0.7rem] mb-2">
-                      <span className="text-mint">YES {market.yes}%</span>
-                      <span className="text-orange">NO {100 - market.yes}%</span>
-                    </div>
-                    <div className="h-1 bg-orange-dim relative overflow-hidden">
-                      <div
-                        className="absolute left-0 top-0 bottom-0 bg-mint transition-all duration-300 ease-in-out"
-                        style={{
-                          width: `${market.yes}%`,
-                        }}
-                      />
-                    </div>
-                  </div>
-
-                  {/* Footer */}
-                  <div className="flex justify-between text-[0.65rem] text-text-dim tracking-[0.06em]">
-                    <span>VOL {market.volume}</span>
-                    <span>CLOSES {market.closes}</span>
-                  </div>
-                </div>
-              </div>
-            </Link>
-          ))}
+        <div className="border-b border-border-grid">
+          <div className="page-shell grid gap-3 py-3 text-xs tracking-[0.08em] text-text sm:grid-cols-2 xl:grid-cols-4">
+            <span>MARKETS: <span className="font-semibold text-mint">{totalMarkets}</span></span>
+            <span>TOTAL COLLATERAL: <span className="font-semibold text-mint">{totalVolume} {COLLATERAL_SYMBOL}</span></span>
+            <span>UNIQUE CREATORS: <span className="font-semibold text-mint">{activeTraders}</span></span>
+            <span>NETWORK: <span className="font-semibold text-tribe-b">TESTNET</span></span>
+          </div>
         </div>
-      </main>
 
-      <Footer />
+        <main className="page-shell page-section flex-1">
+          <div className="mobile-scroll-row mb-4 border-b border-border-panel">
+            <div className="flex min-w-max gap-2 pb-3">
+              {FILTER_TABS.map((tab) => (
+                <button
+                  key={tab}
+                  onClick={() => setFilterTab(tab)}
+                  className={`touch-target inline-flex min-h-11 items-center justify-center whitespace-nowrap border px-4 py-2 text-xs font-semibold tracking-[0.1em] uppercase transition-all duration-200 ease-in-out ${
+                    filterTab === tab
+                      ? "border-mint-dim bg-[rgba(202,245,222,0.12)] text-mint"
+                      : "border-border-panel bg-transparent text-text-muted"
+                  }`}
+                >
+                  {getFilterLabel(tab)}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <input
+            type="text"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="SEARCH MARKETS..."
+            className="touch-target mb-6 min-h-11 w-full border border-border-panel bg-bg-panel px-3 py-2 text-xs tracking-[0.08em] text-mint outline-none"
+          />
+
+          {isLoading ? (
+            <div className="border border-border-panel bg-bg-panel px-4 py-8 text-center text-sm tracking-[0.08em] text-text-muted">
+              LOADING LIVE MARKETS...
+            </div>
+          ) : error && markets.length === 0 ? (
+            <div className="border border-orange-dim bg-[rgba(221,122,31,0.08)] px-4 py-6 text-sm leading-relaxed text-orange">
+              LIVE MARKET FEED UNAVAILABLE.
+              <div className="mt-2 text-text-muted">{error.message}</div>
+            </div>
+          ) : filteredMarkets.length === 0 ? (
+            <div className="border border-border-panel bg-bg-panel px-4 py-8 text-center text-sm leading-relaxed text-text-muted">
+              {hasActiveFilters
+                ? "No markets match the current search or filter selection."
+                : "No live markets are available yet. Create the first market to seed the board."}
+            </div>
+          ) : (
+            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+              {filteredMarkets.map((market) => {
+                const isClosingSoon =
+                  market.state === MarketState.OPEN && market.closeTimeMs - Date.now() < 12 * 60 * 60 * 1000;
+                const needsProposal = market.state === MarketState.CLOSED && !market.proposal;
+                const inDisputeWindow = market.state === MarketState.RESOLUTION_PENDING;
+                const isDisputed = market.state === MarketState.DISPUTED;
+                const isResolved = market.state === MarketState.RESOLVED || market.state === MarketState.INVALID;
+                const hasStatusBadge = isClosingSoon || needsProposal || inDisputeWindow || isDisputed || isResolved;
+
+                return (
+                  <Link key={market.id} to={`/markets/${market.id}`} className="text-inherit no-underline">
+                    <div className="relative flex h-full flex-col justify-between border border-border-panel bg-bg-panel p-5 transition-all duration-200 ease-in-out hover:border-mint-dim hover:shadow-[0_0_12px_rgba(202,245,222,0.08)] md:min-h-[200px]">
+                      {isClosingSoon && (
+                        <div className="absolute right-3 top-3 max-w-[5.5rem] border border-orange-dim bg-[rgba(221,122,31,0.1)] px-2 py-1 text-[0.5rem] font-bold tracking-[0.1em] text-orange">
+                          CLOSING
+                        </div>
+                      )}
+                      {needsProposal && (
+                        <div className="absolute right-3 top-3 max-w-[5.5rem] border border-orange-dim bg-[rgba(221,122,31,0.1)] px-2 py-1 text-[0.5rem] font-bold tracking-[0.1em] text-orange">
+                          NEEDS PROPOSAL
+                        </div>
+                      )}
+                      {inDisputeWindow && (
+                        <div className="absolute right-3 top-3 max-w-[5.5rem] border border-mint-dim bg-[rgba(202,245,222,0.1)] px-2 py-1 text-[0.5rem] font-bold tracking-[0.1em] text-mint">
+                          DISPUTE WINDOW
+                        </div>
+                      )}
+                      {isDisputed && (
+                        <div className="absolute right-3 top-3 max-w-[5.5rem] border border-yellow-dim bg-[rgba(242,201,76,0.1)] px-2 py-1 text-[0.5rem] font-bold tracking-[0.1em] text-yellow">
+                          DISPUTED
+                        </div>
+                      )}
+                      {isResolved && (
+                        <div className="absolute right-3 top-3 max-w-[5.5rem] border border-mint-dim bg-[rgba(202,245,222,0.1)] px-2 py-1 text-[0.5rem] font-bold tracking-[0.1em] text-mint">
+                          RESOLVED
+                        </div>
+                      )}
+
+                      <div className={`line-clamp-2 text-sm font-semibold leading-6 tracking-[0.04em] text-mint ${hasStatusBadge ? "pr-24" : ""}`}>
+                        {market.title}
+                      </div>
+
+                      <div className="mt-4">
+                        <div className="mb-3">
+                          <div className="mb-2 flex justify-between text-[0.7rem]">
+                            <span className="text-mint">YES {market.yes}%</span>
+                            <span className="text-orange">NO {100 - market.yes}%</span>
+                          </div>
+                          <div className="relative h-1 overflow-hidden bg-orange-dim">
+                            <div
+                              className="absolute bottom-0 left-0 top-0 bg-mint transition-all duration-300 ease-in-out"
+                              style={{ width: `${market.yes}%` }}
+                            />
+                          </div>
+                        </div>
+
+                        <div className="flex flex-col gap-1 text-[0.65rem] tracking-[0.06em] text-text-dim sm:flex-row sm:justify-between">
+                          <span>VOL {market.volume}</span>
+                          <span>CLOSES {market.closes}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </Link>
+                );
+              })}
+            </div>
+          )}
+        </main>
+
+        <Footer />
       </div>
     </TerminalScreen>
   );

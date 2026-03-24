@@ -1,6 +1,6 @@
 # Frontier Prediction Market
 
-Community-built on-chain prediction market on Sui, powered by SUFFER (SFR) token. Create markets on game outcomes, trade shares via constant-product AMM, and resolve disputes through decentralized tokenholder voting. Built by a player, for players.
+Community-built on-chain prediction market on Sui, powered by an external SUFFER (SFR) collateral family. Create markets on game outcomes, trade shares via constant-product AMM, and resolve disputes through decentralized tokenholder voting. Built by a player, for players.
 
 ## Architecture
 
@@ -102,7 +102,7 @@ Sponsor transactions so users don't need SUI tokens for voting/staking.
 ```bash
 cd gas-relay
 cp .env.example .env
-# Edit .env: set SPONSOR_KEYPAIR_B64 and PM_PACKAGE_ID
+# Edit .env: set SPONSOR_KEYPAIR and PM_PACKAGE_ID
 npm install
 npm run dev
 # → localhost:3001

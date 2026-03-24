@@ -1,5 +1,4 @@
 import TerminalPanel from "../../components/terminal/TerminalPanel";
-import { COLLATERAL_SYMBOL } from "../../lib/market-constants";
 import { MarketType, MARKET_TYPE_LABELS } from "../../lib/market-types";
 
 interface MarketPreviewProps {
@@ -42,7 +41,7 @@ export default function MarketPreview({
   const previewTitle = title.trim() || "Untitled community market";
   const previewDescription =
     description.trim() ||
-    "This preview mirrors the live shell so spacing, wrapping, and copy stay honest while you create the market.";
+    "Add a short description so traders can quickly understand what this market is asking.";
   const previewOutcomes = outcomes.filter((value) => value.trim().length > 0);
 
   return (
@@ -73,9 +72,7 @@ export default function MarketPreview({
             </div>
             <div className="border border-border-panel bg-bg-terminal px-3 py-3">
               <div className="mb-1 text-[0.58rem] tracking-[0.16em] text-text-dim">CREATION BOND</div>
-              <div className="text-sm text-text">
-                {creationBond || "0"} {COLLATERAL_SYMBOL}
-              </div>
+              <div className="text-sm text-text">{creationBond || "Set a bond amount"}</div>
             </div>
           </div>
 
@@ -101,8 +98,8 @@ export default function MarketPreview({
           </div>
 
           <div className="border border-border-panel bg-[rgba(202,245,222,0.04)] px-3 py-3 text-sm leading-7 text-text-muted">
-            Mobile-safe preview uses the same shell sizing as the live market cards and detail panels, so copy and spacing stay
-            honest while you build the market.
+            Preview the market card before you publish so the title, timing, outcomes, and bond all read clearly for other
+            traders.
           </div>
         </div>
       </TerminalPanel>

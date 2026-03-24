@@ -1,5 +1,4 @@
 import { MarketType, MARKET_TYPE_LABELS } from "../../lib/market-types";
-import { COLLATERAL_SYMBOL } from "../../lib/market-constants";
 
 interface ReviewStepProps {
   title: string;
@@ -60,22 +59,22 @@ export default function ReviewStep({
 
       <div className="mb-6">
         <div className="text-text-dim mb-1 text-xs font-medium">CLOSES</div>
-        <div className="text-base">{closeDate || "Not set"}</div>
+        <div className="text-base">{closeDate || "Choose a close date and time"}</div>
       </div>
 
       <div className="mb-6">
         <div className="text-text-dim mb-1 text-xs font-medium">EVIDENCE INPUT</div>
         <div className="text-base">
-          <div>Type: {resolutionSourceType}</div>
-          <div>URI: {resolutionSourceUri || "Optional / not set"}</div>
-          <div>Creator controls source: {creatorControls ? "Yes" : "No"}</div>
+          <div>Source type: {resolutionSourceType}</div>
+          <div>Source link: {resolutionSourceUri || "Optional"}</div>
+          <div>Creator influence disclosed: {creatorControls ? "Yes" : "No"}</div>
         </div>
       </div>
 
       <div className="mb-6">
         <div className="text-text-dim mb-1 text-xs font-medium">BONDS</div>
         <div className="text-base">
-          Creation: {creationBond} {COLLATERAL_SYMBOL} | Dispute: {resolutionBond} {COLLATERAL_SYMBOL}
+          Creation: {creationBond} | Dispute: {resolutionBond}
         </div>
       </div>
     </div>
