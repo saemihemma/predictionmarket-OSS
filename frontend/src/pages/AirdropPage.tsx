@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import type { DAppKit, UiWallet } from "@mysten/dapp-kit-core";
 import { useCurrentAccount, useDAppKit, useWallets } from "@mysten/dapp-kit-react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
@@ -8,6 +9,7 @@ import sufferCycleMint from "../assets/suffer-cycle-mint.svg";
 import TerminalScreen from "../components/terminal/TerminalScreen";
 import Footer from "../components/ui/Footer";
 import PageHeader from "../components/ui/PageHeader";
+import WalletPicker from "../components/ui/WalletPicker";
 import { useCollateralBalance } from "../hooks/useCollateralBalance";
 import { useSponsoredTransaction } from "../hooks/useSponsoredTransaction";
 import { protocolReadTransport } from "../lib/client";
@@ -16,6 +18,7 @@ import { buildFaucetClaimTransaction } from "../lib/faucet-transactions";
 import { formatAddress } from "../lib/formatting";
 import { checkRelayHealth } from "../lib/gas-relay-client";
 import { COLLATERAL_SYMBOL, PM_FAUCET_ID, PM_GAS_RELAY_URL } from "../lib/market-constants";
+import { connectSelectedWallet } from "../lib/wallet-session";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const EXPLORER_BASE_URL = "https://testnet.suivision.xyz/txblock";
@@ -191,10 +194,11 @@ function toFriendlyClaimError(error: unknown): string {
 export default function AirdropPage() {
   const account = useCurrentAccount();
   const wallets = useWallets();
-  const dAppKit = useDAppKit() as any;
+  const dAppKit = useDAppKit() as DAppKit;
   const claimDeckRef = useRef<HTMLElement | null>(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
-  const [connectBusy, setConnectBusy] = useState(false);
+  const [walletPickerOpen, setWalletPickerOpen] = useState(false);
+  const [connectingWalletName, setConnectingWalletName] = useState<string | null>(null);
   const [claimStage, setClaimStage] = useState<ClaimStage>("idle");
   const [claimError, setClaimError] = useState<string | null>(null);
   const [successDigest, setSuccessDigest] = useState<string | null>(null);
@@ -276,18 +280,18 @@ export default function AirdropPage() {
                         ? "cooldown"
                         : "eligible";
 
-  async function handleConnect() {
-    if (wallets.length === 0) return;
-    setConnectBusy(true);
+  async function handleConnect(wallet: UiWallet) {
+    setConnectingWalletName(wallet.name);
     setClaimError(null);
     try {
-      await dAppKit.connectWallet({ wallet: wallets[0] });
+      await connectSelectedWallet(dAppKit, wallet);
+      setWalletPickerOpen(false);
       claimDeckRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
     } catch (error) {
       console.error("Wallet connection failed:", error);
       setClaimError("Wallet connection did not complete. Try again.");
     } finally {
-      setConnectBusy(false);
+      setConnectingWalletName(null);
     }
   }
 
@@ -572,11 +576,11 @@ export default function AirdropPage() {
                   {claimMode === "disconnected" || claimMode === "noWallet" ? (
                     <button
                       type="button"
-                      onClick={handleConnect}
-                      disabled={connectBusy || wallets.length === 0}
+                      onClick={() => setWalletPickerOpen(true)}
+                      disabled={Boolean(connectingWalletName) || wallets.length === 0}
                       className="touch-target inline-flex min-h-12 items-center justify-center border-2 border-orange bg-[rgba(221,122,31,0.08)] px-5 py-3 text-xs font-semibold uppercase tracking-[0.18em] text-orange disabled:cursor-not-allowed disabled:opacity-40"
                     >
-                      {wallets.length === 0 ? "NO WALLET DETECTED" : connectBusy ? "CONNECTING..." : "CONNECT WALLET TO CLAIM"}
+                      {wallets.length === 0 ? "NO WALLET DETECTED" : connectingWalletName ? "CONNECTING..." : "CONNECT WALLET TO CLAIM"}
                     </button>
                   ) : claimMode === "eligible" ? (
                     <button
@@ -679,7 +683,7 @@ export default function AirdropPage() {
                   <div className="mb-4 text-[0.68rem] font-semibold tracking-[0.13em] text-text-muted">HOW IT WORKS</div>
                   <div className="space-y-4 text-[0.8rem] leading-6 tracking-[0.05em] text-text-muted">
                     <p className="m-0">
-                      This page is the claim gate. Connect your wallet, press claim, and approve when your wallet asks.
+                      This page is the claim gate. Choose a Sui-compatible wallet, press claim, and approve when your wallet asks.
                     </p>
                     <p className="m-0">
                       First-time riders draw the starter amount. After that, the frontier resets at 00:00 UTC and the daily amount returns.
@@ -719,6 +723,17 @@ export default function AirdropPage() {
             </div>
           </section>
         </main>
+
+        {walletPickerOpen && (
+          <WalletPicker
+            wallets={wallets}
+            connectingWalletName={connectingWalletName}
+            onClose={() => setWalletPickerOpen(false)}
+            onSelect={handleConnect}
+            title="CHOOSE A WALLET TO CLAIM"
+            description="This faucet runs on Sui testnet. Pick the wallet you want to use and the claim flow will continue here."
+          />
+        )}
 
         <Footer />
       </div>

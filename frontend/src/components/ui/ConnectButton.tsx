@@ -1,7 +1,13 @@
 import { useRef, useEffect, useState } from "react";
+import type { DAppKit, UiWallet } from "@mysten/dapp-kit-core";
 import { Link } from "react-router-dom";
 import { useCurrentAccount, useWallets, useDAppKit } from "@mysten/dapp-kit-react";
 import { formatAddress } from "../../lib/formatting";
+import {
+  connectSelectedWallet,
+  disconnectSelectedWallet,
+} from "../../lib/wallet-session";
+import WalletPicker from "./WalletPicker";
 
 /**
  * Shared wallet connection button.
@@ -11,9 +17,10 @@ import { formatAddress } from "../../lib/formatting";
 export default function ConnectButton() {
   const account = useCurrentAccount();
   const wallets = useWallets();
-  const dAppKit = useDAppKit();
+  const dAppKit = useDAppKit() as DAppKit;
   const [open, setOpen] = useState(false);
-  const [connecting, setConnecting] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [connectingWalletName, setConnectingWalletName] = useState<string | null>(null);
   const ref = useRef<HTMLDivElement>(null);
   const buttonClasses =
     "touch-target inline-flex min-h-11 items-center justify-center border border-mint-dim bg-transparent px-4 py-2 font-mono text-xs font-semibold tracking-[0.08em] text-mint transition-all duration-200 hover:border-mint hover:shadow-[0_0_12px_rgba(202,245,222,0.15)] disabled:cursor-not-allowed disabled:opacity-40";
@@ -29,21 +36,21 @@ export default function ConnectButton() {
     return () => document.removeEventListener("mousedown", handler);
   }, [open]);
 
-  const handleConnect = async () => {
-    if (wallets.length === 0) return;
-    setConnecting(true);
+  const handleConnect = async (wallet: UiWallet) => {
+    setConnectingWalletName(wallet.name);
     try {
-      await dAppKit.connectWallet({ wallet: wallets[0] });
+      await connectSelectedWallet(dAppKit, wallet);
+      setPickerOpen(false);
     } catch (error) {
       console.error("Wallet connection failed:", error);
     } finally {
-      setConnecting(false);
+      setConnectingWalletName(null);
     }
   };
 
   const handleDisconnect = async () => {
     try {
-      await dAppKit.disconnectWallet();
+      await disconnectSelectedWallet(dAppKit);
     } catch (error) {
       console.error("Wallet disconnect failed:", error);
     }
@@ -52,9 +59,25 @@ export default function ConnectButton() {
 
   if (!account) {
     return (
-      <button onClick={handleConnect} disabled={connecting || wallets.length === 0} className={buttonClasses}>
-        {connecting ? "CONNECTING..." : wallets.length === 0 ? "NO WALLET" : "CONNECT WALLET"}
-      </button>
+      <>
+        <button
+          onClick={() => setPickerOpen(true)}
+          disabled={Boolean(connectingWalletName) || wallets.length === 0}
+          className={buttonClasses}
+        >
+          {connectingWalletName ? "CONNECTING..." : wallets.length === 0 ? "NO WALLET" : "CONNECT WALLET"}
+        </button>
+        {pickerOpen && (
+          <WalletPicker
+            wallets={wallets}
+            connectingWalletName={connectingWalletName}
+            onClose={() => setPickerOpen(false)}
+            onSelect={handleConnect}
+            title="CHOOSE YOUR WALLET"
+            description="Pick the wallet you want the Orchestrator to use. Disconnect will stick until you choose again."
+          />
+        )}
+      </>
     );
   }
 

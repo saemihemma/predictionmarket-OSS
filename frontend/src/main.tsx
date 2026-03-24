@@ -5,6 +5,7 @@ import { createDAppKit } from "@mysten/dapp-kit-core";
 import { DAppKitProvider } from "@mysten/dapp-kit-react";
 import "./index.css";
 import { getProtocolManifest, initializeProtocolManifest } from "./lib/protocol-config";
+import { isWalletAutoConnectSuppressed } from "./lib/wallet-session";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -29,7 +30,7 @@ async function bootstrap() {
     networks: [manifest.network],
     defaultNetwork: manifest.network,
     createClient: () => suiClient,
-    autoConnect: true,
+    autoConnect: !isWalletAutoConnectSuppressed(),
   });
 
   ReactDOM.createRoot(document.getElementById("root")!).render(
