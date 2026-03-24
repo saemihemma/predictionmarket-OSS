@@ -27,9 +27,9 @@
     "deployerAddress":  "0x3ea0db23564bf2b6b68dfcc042fe167f754eb83065d0d666e308ef2b93088ec3",
     "operatorAddress":  "0x5d6191eab8388aa9679f3387b0d9d4a8085e0c4bf91253696214c811421cb734",
     "serviceUrls":  {
-                        "gasRelay":  "",
-                        "phaseBotHealth":  "",
-                        "phaseBotReady":  ""
+                        "gasRelay":  "https://splendid-illumination-production.up.railway.app",
+                        "phaseBotHealth":  "https://worthy-delight-production-6422.up.railway.app/health",
+                        "phaseBotReady":  "https://worthy-delight-production-6422.up.railway.app/ready"
                     },
     "marketTypePolicies":  {
                                "0:0:0":  "0x9620e5a4a859cfc609d9777302b9c24d5234fa457cce66f3783f4cd6d64a85ed",

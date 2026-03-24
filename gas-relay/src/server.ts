@@ -15,8 +15,24 @@ const IS_DEPLOYED_ENVIRONMENT =
   Boolean(process.env.RAILWAY_PROJECT_ID) ||
   Boolean(process.env.RAILWAY_ENVIRONMENT_NAME);
 
+function normalizeAllowedOrigin(origin: string | undefined): string {
+  const trimmed = origin?.trim() ?? "";
+  if (!trimmed || trimmed === "*") {
+    return "*";
+  }
+
+  if (/^https?:\/\//i.test(trimmed)) {
+    return trimmed.replace(/\/+$/, "");
+  }
+
+  const defaultScheme = /^(localhost|127(?:\.\d{1,3}){3}|\[::1\])(?::\d+)?$/i.test(trimmed) ? "http://" : "https://";
+  return `${defaultScheme}${trimmed}`.replace(/\/+$/, "");
+}
+
+const allowedOrigin = normalizeAllowedOrigin(process.env.ALLOWED_ORIGIN);
+
 app.use(cors({
-  origin: process.env.ALLOWED_ORIGIN ?? "*",
+  origin: allowedOrigin,
   methods: ["POST", "GET"],
 }));
 app.use(express.json({ limit: "256kb" }));

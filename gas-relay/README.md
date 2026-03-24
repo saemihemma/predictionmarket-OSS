@@ -70,6 +70,8 @@ Optional but recommended:
 - `ALLOWED_ORIGIN`
 - `API_KEY`
 
+For deployed environments, `ALLOWED_ORIGIN` should be a full origin with scheme, for example `https://orchestrator.lineagewar.xyz`.
+
 ## Development
 
 ```bash
