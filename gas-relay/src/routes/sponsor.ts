@@ -6,6 +6,22 @@ import { leaseCoin, returnCoin, hasActiveLease, refreshCoinVersionFromChain } fr
 import { getFrontierEligibility } from "../lib/frontier-eligibility.js";
 
 const DEFAULT_FAUCET_CLAIM_END_AT = "2026-04-01T00:00:00Z";
+const DEFAULT_SPONSORED_GAS_BUDGET = parseInt(
+  process.env.DEFAULT_GAS_BUDGET ?? process.env.MAX_GAS_BUDGET ?? "50000000",
+  10,
+);
+
+class SponsorBuildError extends Error {
+  status: number;
+  reason?: string;
+
+  constructor(message: string, status = 400, reason?: string) {
+    super(message);
+    this.name = "SponsorBuildError";
+    this.status = status;
+    this.reason = reason;
+  }
+}
 
 function getFaucetClaimEndAt(): string {
   return process.env.FAUCET_CLAIM_END_AT?.trim() || DEFAULT_FAUCET_CLAIM_END_AT;
@@ -106,17 +122,26 @@ export async function sponsorRoute(req: Request, res: Response): Promise<void> {
     const tx = Transaction.fromKind(txBytes);
     tx.setSender(sender);
     tx.setGasOwner(sponsorAddress);
-
-    if (gasBudget) {
-      tx.setGasBudget(gasBudget);
-    }
-
+    tx.setGasBudget(gasBudget ?? DEFAULT_SPONSORED_GAS_BUDGET);
     tx.setGasPayment([gasCoin]);
 
     const builtBytes = await tx.build({ client: suiClient });
+    const sponsoredTxBytes = Buffer.from(builtBytes).toString("base64");
+    const dryRun = await suiClient.dryRunTransactionBlock({
+      transactionBlock: sponsoredTxBytes,
+    });
+    const dryRunStatus = dryRun.effects?.status;
+
+    if (dryRunStatus?.status === "failure") {
+      throw new SponsorBuildError(
+        dryRunStatus.error?.trim() || "Sponsored transaction failed simulation.",
+        400,
+        dryRun.executionErrorSource?.trim() || undefined,
+      );
+    }
 
     res.json({
-      txBytes: Buffer.from(builtBytes).toString("base64"),
+      txBytes: sponsoredTxBytes,
       sponsorAddress,
       gasCoinId: leasedCoinId,
     });
@@ -127,8 +152,15 @@ export async function sponsorRoute(req: Request, res: Response): Promise<void> {
     if (leasedCoinId) returnCoin(leasedCoinId);
 
     console.error("[gas-relay] sponsor error:", err);
-    res.status(500).json({
+    const status =
+      err instanceof SponsorBuildError
+        ? err.status
+        : err instanceof Error && /simulate/i.test(err.message)
+          ? 400
+          : 500;
+    res.status(status).json({
       error: err instanceof Error ? err.message : "Internal sponsor error",
+      reason: err instanceof SponsorBuildError ? err.reason : undefined,
     });
   }
 }
