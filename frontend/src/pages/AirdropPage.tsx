@@ -1046,16 +1046,8 @@ export default function AirdropPage() {
                     ))}
                   </div>
 
-                  <div className="mt-5 flex items-center justify-between gap-3 border-t border-border-panel pt-4">
-                    <div className="text-[0.72rem] leading-5 tracking-[0.05em] text-text-dim">
-                      Claim here with the same EVE Vault wallet address your Frontier rider uses.
-                    </div>
-                    <Link
-                      to="/markets/diagnostics"
-                      className="text-[0.68rem] font-semibold tracking-[0.11em] text-mint no-underline"
-                    >
-                      VIEW TRUST DETAILS
-                    </Link>
+                  <div className="mt-5 border-t border-border-panel pt-4 text-[0.72rem] leading-5 tracking-[0.05em] text-text-dim">
+                    Claim here with the same EVE Vault wallet address your Frontier rider uses.
                   </div>
                 </div>
               )}
