@@ -7,8 +7,9 @@ import {
   buildBuyTransaction,
   buildSellTransaction,
 } from "../../lib/market-transactions";
-import { fetchCollateralCoins, formatCollateralAmount, parseCollateralInput } from "../../lib/collateral";
+import { fetchCollateralCoins, formatCollateralAmount } from "../../lib/collateral";
 import { COLLATERAL_SYMBOL } from "../../lib/market-constants";
+import { formatShareLabel, parseShareInput } from "../../lib/shares";
 import { useProtocolRuntimeConfig } from "../../hooks/useProtocolRuntimeConfig";
 import { useSponsoredTransaction } from "../../hooks/useSponsoredTransaction";
 
@@ -67,10 +68,28 @@ export default function MarketDetailSidebar({
     [positions, selectedOutcome],
   );
 
-  const parsedTradeAmount = useMemo(() => parseCollateralInput(tradeAmount), [tradeAmount]);
+  const parsedTradeInput = useMemo(() => {
+    try {
+      return {
+        amount: parseShareInput(tradeAmount),
+        error: null as string | null,
+      };
+    } catch (error) {
+      return {
+        amount: 0n,
+        error: error instanceof Error ? error.message : "Invalid share quantity.",
+      };
+    }
+  }, [tradeAmount]);
+  const parsedTradeAmount = parsedTradeInput.amount;
+  const shareInputError = parsedTradeInput.error;
   const tradingFeeBps = protocolConfig ? BigInt(protocolConfig.tradingFeeBps) : 0n;
 
   const quote = useMemo(() => {
+    if (shareInputError) {
+      return { error: shareInputError };
+    }
+
     if (parsedTradeAmount <= 0n) {
       return null;
     }
@@ -101,11 +120,15 @@ export default function MarketDetailSidebar({
         error: error instanceof Error ? error.message : "Unable to quote trade.",
       };
     }
-  }, [market.outcomeQuantities, parsedTradeAmount, selectedOutcome, tradeType, tradingFeeBps]);
+  }, [market.outcomeQuantities, parsedTradeAmount, selectedOutcome, shareInputError, tradeType, tradingFeeBps]);
 
   const handleExecuteTrade = async () => {
     if (!account) {
       setTradeError("Connect wallet to trade.");
+      return;
+    }
+    if (shareInputError) {
+      setTradeError(shareInputError);
       return;
     }
     if (parsedTradeAmount <= 0n) {
@@ -155,6 +178,7 @@ export default function MarketDetailSidebar({
               maxCost,
               deadlineMs,
               paymentCoinIds: inventory.coinObjectIds,
+              senderAddress: account,
             });
 
         await executeSponsoredTx(tx);
@@ -184,6 +208,7 @@ export default function MarketDetailSidebar({
   const canTrade =
     Boolean(account) &&
     parsedTradeAmount > 0n &&
+    !shareInputError &&
     !tradePending &&
     !(quote && "error" in quote) &&
     (tradeType === "buy" || Boolean(selectedPosition));
@@ -259,12 +284,15 @@ export default function MarketDetailSidebar({
             </div>
 
             <div>
-              <label className="mb-2 block text-[0.95rem] font-medium text-mint">QUANTITY ({COLLATERAL_SYMBOL} UNITS)</label>
+              <label className="mb-2 block text-[0.95rem] font-medium text-mint">QUANTITY (SHARES)</label>
               <input
                 type="number"
                 value={tradeAmount}
                 onChange={(event) => setTradeAmount(event.target.value)}
-                placeholder="0.00"
+                min="1"
+                step="1"
+                inputMode="numeric"
+                placeholder="0"
                 className="touch-target min-h-11 w-full border border-border-panel bg-bg-terminal px-3 py-2 text-base text-text outline-none"
               />
             </div>
@@ -340,7 +368,7 @@ export default function MarketDetailSidebar({
                 className="flex items-center justify-between gap-3 border border-border-panel bg-bg-terminal px-3 py-2"
               >
                 <span>{market.outcomeLabels[position.outcomeIndex]}</span>
-                <span>{formatCollateralAmount(position.quantity, { withSymbol: true })}</span>
+                <span>{formatShareLabel(position.quantity)}</span>
               </div>
             ))}
           </div>

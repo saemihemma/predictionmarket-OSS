@@ -82,7 +82,22 @@ type CommandShape = {
   target?: string;
 };
 
+type InputArgumentShape = {
+  $kind?: string;
+  Input?: number;
+  Result?: number;
+  NestedResult?: [number, number] | number[];
+};
+
+type PureInputShape = {
+  $kind?: string;
+  Pure?: {
+    bytes?: string;
+  };
+};
+
 type TxDataShape = {
+  inputs?: PureInputShape[];
   commands?: CommandShape[];
 };
 
@@ -90,6 +105,93 @@ export interface ValidationResult {
   valid: boolean;
   reason?: string;
   faucetClaim?: boolean;
+}
+
+function decodePureAddressInput(input: PureInputShape | undefined): string | null {
+  const bytes = input?.Pure?.bytes;
+  if (!bytes) {
+    return null;
+  }
+
+  try {
+    return normalizeAddr(`0x${Buffer.from(bytes, "base64").toString("hex")}`);
+  } catch {
+    return null;
+  }
+}
+
+function extractTransferredResultIndex(argument: unknown): number | null {
+  if (!argument || typeof argument !== "object") {
+    return null;
+  }
+
+  const candidate = argument as InputArgumentShape;
+  if (typeof candidate.Result === "number") {
+    return candidate.Result;
+  }
+
+  if (
+    Array.isArray(candidate.NestedResult) &&
+    candidate.NestedResult.length === 2 &&
+    candidate.NestedResult[1] === 0 &&
+    typeof candidate.NestedResult[0] === "number"
+  ) {
+    return candidate.NestedResult[0];
+  }
+
+  return null;
+}
+
+export function getSponsoredTransferVerdict(params: {
+  command: CommandShape;
+  txData: TxDataShape;
+  sender: string;
+  sponsoredBuyCommandIndexes: Set<number>;
+}): ValidationResult {
+  const { command, txData, sender, sponsoredBuyCommandIndexes } = params;
+  const transfer = command.TransferObjects as
+    | {
+        objects?: unknown[];
+        address?: unknown;
+      }
+    | undefined;
+
+  if (!transfer) {
+    return { valid: false, reason: "TransferObjects command missing payload" };
+  }
+
+  if (!Array.isArray(transfer.objects) || transfer.objects.length !== 1) {
+    return {
+      valid: false,
+      reason: "Sponsored TransferObjects commands must transfer exactly one freshly created position object.",
+    };
+  }
+
+  const transferredResultIndex = extractTransferredResultIndex(transfer.objects[0]);
+  if (transferredResultIndex === null || !sponsoredBuyCommandIndexes.has(transferredResultIndex)) {
+    return {
+      valid: false,
+      reason: "Sponsored TransferObjects commands may only transfer the direct result of pm_trading::buy.",
+    };
+  }
+
+  const addressArg = transfer.address as InputArgumentShape | undefined;
+  if (typeof addressArg?.Input !== "number") {
+    return {
+      valid: false,
+      reason: "Sponsored TransferObjects commands must transfer the bought position back to the transaction sender.",
+    };
+  }
+
+  const recipient = decodePureAddressInput(txData.inputs?.[addressArg.Input]);
+  if (!recipient || recipient !== normalizeAddr(sender)) {
+    return {
+      valid: false,
+      reason: "Sponsored TransferObjects commands must transfer the bought position back to the transaction sender.",
+    };
+  }
+
+  return { valid: true };
 }
 
 export function getSponsoredMoveCallVerdict(params: {
@@ -191,8 +293,9 @@ export async function validateTransactionRequest(
   let disputeRoundId: string | undefined;
   let faucetClaim = false;
   let usesIntoBalanceHelper = false;
+  const sponsoredBuyCommandIndexes = new Set<number>();
 
-  for (const command of txData.commands ?? []) {
+  for (const [commandIndex, command] of (txData.commands ?? []).entries()) {
     if (command.$kind === "MoveCall" || command.MoveCall) {
       const moveCall = (command.MoveCall ?? command) as CommandShape;
       const targetPackage = moveCall.package ?? moveCall.target?.split("::")[0];
@@ -217,6 +320,10 @@ export async function validateTransactionRequest(
 
       faucetClaim ||= Boolean(verdict.faucetClaim);
 
+      if (module === "pm_trading" && fn === "buy") {
+        sponsoredBuyCommandIndexes.add(commandIndex);
+      }
+
       if ((module === "pm_sdvm" || module === "pm_dispute") && !disputeRoundId) {
         disputeRoundId = extractDisputeRoundId(txData as Record<string, unknown>, PM_PACKAGE_ID);
       }
@@ -232,7 +339,16 @@ export async function validateTransactionRequest(
     }
 
     if (command.$kind === "TransferObjects" || command.TransferObjects) {
-      return { valid: false, reason: "TransferObjects commands not allowed in sponsored tx" };
+      const verdict = getSponsoredTransferVerdict({
+        command,
+        txData,
+        sender,
+        sponsoredBuyCommandIndexes,
+      });
+      if (!verdict.valid) {
+        return verdict;
+      }
+      continue;
     }
 
     if (

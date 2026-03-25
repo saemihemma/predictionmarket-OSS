@@ -471,8 +471,7 @@ export const protocolReadTransport: ReadTransport = {
   transportStatus,
 };
 
-export const suiClient = graphqlClient;
-export const transactionBuildClient = rpcFallbackClient;
+export const rpcWriteClient = rpcFallbackClient;
 
 export function getReadTransportStatus(): ReadTransportStatus {
   return protocolReadTransport.transportStatus();

@@ -20,7 +20,7 @@ async function bootstrap() {
   await initializeProtocolManifest();
 
   const manifest = getProtocolManifest();
-  const [{ default: App }, { suiClient }] = await Promise.all([
+  const [{ default: App }, { rpcWriteClient }] = await Promise.all([
     import("./App"),
     import("./lib/client"),
   ]);
@@ -28,7 +28,7 @@ async function bootstrap() {
   const dAppKit = createDAppKit({
     networks: [manifest.network],
     defaultNetwork: manifest.network,
-    createClient: () => suiClient,
+    createClient: () => rpcWriteClient,
     autoConnect: false,
   });
 

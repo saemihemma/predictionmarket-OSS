@@ -2,6 +2,7 @@ import { type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { cn } from "../../lib/utils";
 import { formatValue, formatPnL } from "../../lib/formatting";
+import { formatShareAmount } from "../../lib/shares";
 import ClaimButton from "../../components/ui/ClaimButton";
 
 interface Position {
@@ -130,7 +131,7 @@ export default function PortfolioPositions({
                     <div className="mt-1 text-sm text-text-dim">Outcome: {position.outcome}</div>
                   </div>
                 </Link>
-                <MetricCell label="SHARES" value={Number(position.shares).toLocaleString()} />
+                <MetricCell label="SHARES" value={formatShareAmount(position.shares)} />
                 <MetricCell label="VALUE" value={formatValue(position.value)} valueClassName="text-mint" />
                 <ClaimButton
                   positionId={position.positionId}
@@ -158,7 +159,7 @@ export default function PortfolioPositions({
                     <div className="text-[0.95rem] font-semibold text-text">{position.marketTitle}</div>
                     <div className="mt-1 text-sm text-text-dim">Outcome: {position.outcome}</div>
                   </div>
-                  <MetricCell label="SHARES" value={Number(position.shares).toLocaleString()} />
+                  <MetricCell label="SHARES" value={formatShareAmount(position.shares)} />
                   <MetricCell label="VALUE" value={formatValue(position.value)} valueClassName="text-mint" />
                   <MetricCell
                     label="P&L"
@@ -183,7 +184,7 @@ export default function PortfolioPositions({
                     <div className="text-[0.95rem] font-semibold text-text">{position.marketTitle}</div>
                     <div className="mt-1 text-sm text-text-dim">Outcome: {position.outcome}</div>
                   </div>
-                  <MetricCell label="SHARES" value={Number(position.shares).toLocaleString()} />
+                  <MetricCell label="SHARES" value={formatShareAmount(position.shares)} />
                   <MetricCell label="VALUE" value={formatValue(position.value)} valueClassName="text-text-dim" />
                   <MetricCell label="P&L" value={formatPnL(position.pnl)} valueClassName="font-semibold text-orange" />
                 </PositionShell>

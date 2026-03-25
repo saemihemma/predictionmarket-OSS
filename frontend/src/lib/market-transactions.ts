@@ -71,12 +71,13 @@ export function buildBuyTransaction(params: {
   maxCost: bigint;
   deadlineMs: bigint;
   paymentCoinIds: string[];
+  senderAddress: string;
 }): Transaction {
   const pkg = assertProtocolPackageId();
   const tx = new Transaction();
   const paymentCoin = mergeCoinInputs(tx, params.paymentCoinIds);
 
-  tx.moveCall({
+  const position = tx.moveCall({
     target: `${pkg}::pm_trading::buy`,
     typeArguments: [COLLATERAL_COIN_TYPE],
     arguments: [
@@ -90,6 +91,7 @@ export function buildBuyTransaction(params: {
       paymentCoin,
     ],
   });
+  tx.transferObjects([position], params.senderAddress);
 
   return tx;
 }

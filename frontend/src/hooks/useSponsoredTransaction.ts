@@ -12,7 +12,7 @@
 import { useCallback, useRef, useEffect } from "react";
 import { useDAppKit, useCurrentAccount } from "@mysten/dapp-kit-react";
 import { Transaction } from "@mysten/sui/transactions";
-import { transactionBuildClient } from "../lib/client";
+import { rpcWriteClient } from "../lib/client";
 import {
   sponsorTransaction,
   executeSponsored as executeRelay,
@@ -134,7 +134,7 @@ export function useSponsoredTransaction() {
           let kindBytes: Uint8Array;
           try {
             kindBytes = await tx.build({
-              client: transactionBuildClient,
+              client: rpcWriteClient,
               onlyTransactionKind: true,
             });
           } catch (err) {
