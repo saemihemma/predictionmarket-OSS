@@ -10,6 +10,9 @@ import { RateLimiter, extractDisputeRoundId } from "./rate-limiter.js";
 
 const PM_PACKAGE_ID = process.env.PM_PACKAGE_ID ?? "0x0";
 const MAX_GAS_BUDGET = parseInt(process.env.MAX_GAS_BUDGET ?? "50000000", 10);
+const SUI_FRAMEWORK_PACKAGE_ID = "0x2";
+const COIN_MODULE = "coin";
+const COIN_INTO_BALANCE_FN = "into_balance";
 
 const rateLimiter = new RateLimiter({
   disputeRateLimit: parseInt(process.env.DISPUTE_RATE_LIMIT ?? "100", 10),
@@ -125,6 +128,7 @@ export async function validateTransactionRequest(
 
   let disputeRoundId: string | undefined;
   let faucetClaim = false;
+  let usesIntoBalanceHelper = false;
 
   for (const command of txData.commands ?? []) {
     if (command.$kind === "MoveCall" || command.MoveCall) {
@@ -132,6 +136,16 @@ export async function validateTransactionRequest(
       const targetPackage = moveCall.package ?? moveCall.target?.split("::")[0];
       const module = moveCall.module ?? moveCall.target?.split("::")[1];
       const fn = moveCall.function ?? moveCall.target?.split("::")[2];
+
+      if (
+        targetPackage &&
+        normalizeAddr(targetPackage) === normalizeAddr(SUI_FRAMEWORK_PACKAGE_ID) &&
+        module === COIN_MODULE &&
+        fn === COIN_INTO_BALANCE_FN
+      ) {
+        usesIntoBalanceHelper = true;
+        continue;
+      }
 
       if (!targetPackage || normalizeAddr(targetPackage) !== normalizeAddr(PM_PACKAGE_ID)) {
         return {
@@ -160,6 +174,13 @@ export async function validateTransactionRequest(
         return {
           valid: false,
           reason: `MoveCall targets ${module}::${fn}, which is not sponsored for public beta.`,
+        };
+      }
+
+      if (module === "pm_market" && fn === "create_and_share_market" && !usesIntoBalanceHelper) {
+        return {
+          valid: false,
+          reason: "Market creation sponsorship requires converting the collateral coin into a balance first.",
         };
       }
 

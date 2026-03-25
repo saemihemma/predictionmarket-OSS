@@ -269,7 +269,7 @@ export function buildCreateMarketTransaction(params: {
   });
 
   tx.moveCall({
-    target: `${pkg}::pm_market::create_market`,
+    target: `${pkg}::pm_market::create_and_share_market`,
     typeArguments: [COLLATERAL_COIN_TYPE],
     arguments: [
       tx.object(requireRegistryId()),
