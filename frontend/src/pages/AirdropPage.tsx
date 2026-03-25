@@ -20,12 +20,13 @@ import { buildFaucetClaimTransaction } from "../lib/faucet-transactions";
 import { formatAddress } from "../lib/formatting";
 import { checkFaucetEligibility, checkRelayHealth, RelayApiError } from "../lib/gas-relay-client";
 import { COLLATERAL_COIN_TYPE, COLLATERAL_SYMBOL, PM_FAUCET_ID, PM_GAS_RELAY_URL } from "../lib/market-constants";
-import { connectSelectedWallet } from "../lib/wallet-session";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const EXPLORER_BASE_URL = "https://testnet.suivision.xyz/txblock";
 const EVE_VAULT_RELEASES_URL = "https://github.com/evefrontier/evevault/releases";
 const EVE_VAULT_DOWNLOAD_URL = "https://github.com/evefrontier/evevault/releases/download/v0.0.6/eve-vault-chrome.zip";
+const AIRDROP_MOBILE_DESKTOP_ONLY = true;
+const MOBILE_CLAIM_BREAKPOINT_PX = 768;
 
 type ClaimStage = "idle" | "wallet" | "submitting";
 type ClaimMode =
@@ -253,6 +254,9 @@ export default function AirdropPage() {
   const [successDigest, setSuccessDigest] = useState<string | null>(null);
   const [successAmount, setSuccessAmount] = useState<bigint | null>(null);
   const [copiedField, setCopiedField] = useState<string | null>(null);
+  const [isBelowMd, setIsBelowMd] = useState(() =>
+    typeof window !== "undefined" ? window.innerWidth < MOBILE_CLAIM_BREAKPOINT_PX : false,
+  );
   const walletValue = account ? formatAddress(account.address) : "NOT CONNECTED";
   const balance = useCollateralBalance();
   const { executeSponsoredTx } = useSponsoredTransaction();
@@ -285,6 +289,16 @@ export default function AirdropPage() {
   }, []);
 
   useEffect(() => {
+    function syncViewportGate() {
+      setIsBelowMd(window.innerWidth < MOBILE_CLAIM_BREAKPOINT_PX);
+    }
+
+    syncViewportGate();
+    window.addEventListener("resize", syncViewportGate);
+    return () => window.removeEventListener("resize", syncViewportGate);
+  }, []);
+
+  useEffect(() => {
     if (!copiedField) {
       return;
     }
@@ -308,6 +322,7 @@ export default function AirdropPage() {
     : null;
   const currentUtcDay = getCurrentUtcDay(nowMs);
   const nextResetMs = getNextUtcResetMs(nowMs);
+  const desktopOnlyMobile = AIRDROP_MOBILE_DESKTOP_ONLY && isBelowMd;
 
   const accountClaim = useMemo(() => {
     const owner = account?.address?.toLowerCase();
@@ -321,6 +336,13 @@ export default function AirdropPage() {
   const canAffordClaim = faucet ? faucet.poolBalance >= claimAmount : false;
   const nextClaimCountdown = formatCountdown(nextResetMs - nowMs);
   const explorerUrl = successDigest ? buildExplorerUrl(successDigest) : null;
+  const eligibilityLoading =
+    Boolean(account?.address) &&
+    relayConfigured &&
+    relayReady &&
+    !campaignEnded &&
+    (faucetEligibility.isLoading || (!faucetEligibility.data && !faucetEligibility.isFetched));
+  const initialClaimCheckLoading = faucetLoading || (relayConfigured && relayHealth.isLoading);
   const claimAmountLabel = !account
     ? "TODAY'S CLAIM"
     : sameClaimAmountEachDay
@@ -341,13 +363,7 @@ export default function AirdropPage() {
       ? "claiming"
       : successDigest
         ? "success"
-        : faucetLoading ||
-            (relayConfigured && relayHealth.isLoading) ||
-            (Boolean(account?.address) &&
-              relayConfigured &&
-              relayReady &&
-              !campaignEnded &&
-              (faucetEligibility.isLoading || (!faucetEligibility.data && !faucetEligibility.isFetched)))
+        : initialClaimCheckLoading || eligibilityLoading
           ? "loading"
           : !faucet
             ? "unavailable"
@@ -377,7 +393,7 @@ export default function AirdropPage() {
     setConnectingWalletName(wallet.name);
     setClaimError(null);
     try {
-      await connectSelectedWallet(dAppKit, wallet);
+      await dAppKit.connectWallet({ wallet });
       setWalletPickerOpen(false);
       claimDeckRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
     } catch (error) {
@@ -419,7 +435,9 @@ export default function AirdropPage() {
   }
 
   const claimsValue =
-    claimMode === "success"
+    desktopOnlyMobile
+      ? "DESKTOP ONLY"
+      : claimMode === "success"
       ? "CONFIRMED"
       : claimMode === "cooldown"
         ? "COOLDOWN"
@@ -431,12 +449,14 @@ export default function AirdropPage() {
             ? "ELIGIBILITY DOWN"
         : claimMode === "eligible"
           ? "READY"
-          : claimMode === "claiming"
+        : claimMode === "claiming"
             ? "IN FLIGHT"
               : claimMode === "disconnected" || claimMode === "noWallet"
                 ? "AWAITING WALLET"
                 : claimMode === "loading"
-                  ? "SYNCING"
+                  ? eligibilityLoading
+                    ? "CONNECTING"
+                    : "CHECKING"
                 : claimMode === "paused"
                   ? "PAUSED"
                   : claimMode === "empty"
@@ -444,7 +464,9 @@ export default function AirdropPage() {
                     : "UNAVAILABLE";
 
   const claimsTone =
-    claimMode === "success" || claimMode === "eligible"
+    desktopOnlyMobile
+      ? "text-orange"
+      : claimMode === "success" || claimMode === "eligible"
       ? "text-mint"
       : claimMode === "claiming"
         ? "text-tribe-b"
@@ -496,9 +518,16 @@ export default function AirdropPage() {
   let consoleBody = "Connect your wallet, claim from this console, and watch the reward arrive here after approval.";
   let consoleToneClass = "text-mint";
 
-  if (claimMode === "loading") {
-    consoleHeadline = "SYNCING CLAIM CONSOLE.";
-    consoleBody = "Reading the faucet, the sponsorship channel, and your wallet signal.";
+  if (desktopOnlyMobile) {
+    consoleHeadline = "CLAIMS ARE DESKTOP / PC ONLY.";
+    consoleBody =
+      "EVE Vault claiming is temporarily desktop-only. Open this page on a desktop or PC to connect the correct Frontier rider wallet and claim.";
+    consoleToneClass = "text-orange";
+  } else if (claimMode === "loading") {
+    consoleHeadline = eligibilityLoading ? "WAITING FOR WALLET RESPONSE." : "CONNECTING CLAIM CHANNEL.";
+    consoleBody = eligibilityLoading
+      ? "Checking your Frontier wallet and claim access. This first response can take a moment."
+      : "Opening the claim channel and loading the live faucet state.";
   } else if (claimMode === "noWallet") {
     consoleHeadline = "NO SUI WALLET DETECTED.";
     consoleBody = "A Sui wallet opens this gate. Install one, return here, and claim on testnet.";
@@ -664,13 +693,23 @@ export default function AirdropPage() {
                 </p>
 
                 <div className="mt-6 flex flex-col gap-3 sm:flex-row">
-                  <button
-                    type="button"
-                    onClick={() => claimDeckRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
-                    className="touch-target inline-flex items-center justify-center border-2 border-orange bg-[rgba(221,122,31,0.12)] px-5 py-3 text-xs font-semibold uppercase tracking-[0.18em] text-orange shadow-[0_0_12px_rgba(221,122,31,0.22)] transition-all duration-200 hover:bg-[rgba(221,122,31,0.18)] hover:shadow-[0_0_16px_rgba(221,122,31,0.36)]"
-                  >
-                    CLAIM YOUR $SUFFERING
-                  </button>
+                  {desktopOnlyMobile ? (
+                    <button
+                      type="button"
+                      disabled
+                      className="touch-target inline-flex items-center justify-center border-2 border-orange bg-[rgba(221,122,31,0.12)] px-5 py-3 text-xs font-semibold uppercase tracking-[0.18em] text-orange/80 opacity-90 disabled:cursor-not-allowed"
+                    >
+                      AVAILABLE ON DESKTOP / PC
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => claimDeckRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
+                      className="touch-target inline-flex items-center justify-center border-2 border-orange bg-[rgba(221,122,31,0.12)] px-5 py-3 text-xs font-semibold uppercase tracking-[0.18em] text-orange shadow-[0_0_12px_rgba(221,122,31,0.22)] transition-all duration-200 hover:bg-[rgba(221,122,31,0.18)] hover:shadow-[0_0_16px_rgba(221,122,31,0.36)]"
+                    >
+                      CLAIM YOUR $SUFFERING
+                    </button>
+                  )}
                   <Link
                     to="/markets"
                     className="touch-target inline-flex items-center justify-center border border-mint-dim bg-[rgba(202,245,222,0.08)] px-5 py-3 text-center text-xs font-semibold tracking-[0.18em] text-mint no-underline transition-all duration-200 hover:bg-[rgba(202,245,222,0.14)] hover:shadow-[0_0_14px_rgba(202,245,222,0.16)]"
@@ -678,6 +717,12 @@ export default function AirdropPage() {
                     RETURN TO THE ORCHESTRATOR
                   </Link>
                 </div>
+
+                {desktopOnlyMobile && (
+                  <div className="mt-4 text-[0.8rem] leading-6 tracking-[0.06em] text-text-muted">
+                    EVE Vault claiming is temporarily desktop-only. Open this page on a desktop / PC to claim.
+                  </div>
+                )}
               </div>
             </div>
 
@@ -778,7 +823,15 @@ export default function AirdropPage() {
                 </div>
 
                 <div className="mt-6 flex flex-wrap items-center gap-4">
-                  {claimMode === "disconnected" || claimMode === "noWallet" ? (
+                  {desktopOnlyMobile ? (
+                    <button
+                      type="button"
+                      disabled
+                      className="touch-target inline-flex min-h-12 items-center justify-center border border-orange-dim bg-[rgba(221,122,31,0.08)] px-5 py-3 text-xs font-semibold uppercase tracking-[0.18em] text-orange/80 disabled:cursor-not-allowed"
+                    >
+                      DESKTOP / PC ONLY
+                    </button>
+                  ) : claimMode === "disconnected" || claimMode === "noWallet" ? (
                     <button
                       type="button"
                       onClick={() => setWalletPickerOpen(true)}
@@ -852,7 +905,9 @@ export default function AirdropPage() {
                   ) : (
                     <div className="text-[0.78rem] uppercase tracking-[0.14em] text-orange">
                       {claimMode === "loading"
-                        ? "SYNCING CLAIM CHANNEL"
+                        ? eligibilityLoading
+                          ? "WAITING FOR WALLET RESPONSE"
+                          : "CONNECTING..."
                         : claimMode === "eligibility_unavailable"
                           ? "FRONTIER ELIGIBILITY UNAVAILABLE"
                           : "CLAIMS UNAVAILABLE RIGHT NOW"}
@@ -912,96 +967,98 @@ export default function AirdropPage() {
                 )}
               </div>
 
-              <div ref={connectGuideRef} className="border border-border-panel bg-[rgba(2,5,3,0.5)] p-5 md:p-6">
-                <div className="mb-4 text-[0.68rem] font-semibold tracking-[0.13em] text-text-muted">HOW TO CONNECT</div>
-                <div className="max-w-[32rem] space-y-3">
-                  <div className="text-[0.88rem] font-semibold leading-6 tracking-[0.08em] text-mint">
-                    ONLY FOR THE WALLET TIED TO YOUR FRONTIER RIDER.
-                  </div>
-                  <div className="text-[0.82rem] leading-6 tracking-[0.05em] text-text-muted">
-                    If you connected the wrong Sui wallet, follow this path and return here to claim.
-                  </div>
-                </div>
-
-                <div className="mt-5 grid gap-4 md:grid-cols-2">
-                  {connectSteps.map((step, index) => (
-                    <div
-                      key={step.label}
-                      className={`flex h-full flex-col border bg-bg-panel p-4 ${
-                        index === 3 ? "border-orange-dim shadow-[0_0_14px_rgba(221,122,31,0.12)]" : "border-border-panel"
-                      }`}
-                    >
-                      <div className={`flex h-40 items-center justify-center border px-4 py-5 md:h-44 ${step.shellClassName}`}>
-                        <img src={step.art} alt={step.artAlt} className={`${step.artClassName} h-auto object-contain`} />
-                      </div>
-                      <div className={`mt-4 text-[0.74rem] font-semibold tracking-[0.13em] ${step.toneClassName}`}>{step.label}</div>
-                      <p className="mt-3 m-0 text-[0.82rem] leading-6 tracking-[0.05em] text-text-muted">{step.copy}</p>
-
-                      {"resourceLinks" in step && step.resourceLinks ? (
-                        <div className="mt-4 flex flex-wrap gap-2">
-                          {step.resourceLinks.map((resource) => (
-                            <a
-                              key={resource.href}
-                              href={resource.href}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="inline-flex items-center border border-border-panel px-3 py-2 text-[0.68rem] font-semibold tracking-[0.11em] text-mint no-underline transition-all duration-200 hover:bg-[rgba(202,245,222,0.08)]"
-                            >
-                              {resource.label}
-                            </a>
-                          ))}
-                        </div>
-                      ) : null}
-
-                      {"checklist" in step && step.checklist ? (
-                        <div className="mt-4 space-y-2 text-[0.74rem] leading-5 tracking-[0.05em] text-text-muted">
-                          {step.checklist.map((item, checklistIndex) => (
-                            <div key={item}>
-                              {checklistIndex + 1}. {item}
-                            </div>
-                          ))}
-                        </div>
-                      ) : null}
-
-                      {"utilityValue" in step && step.utilityValue ? (
-                        <div className="mt-4 border border-border-panel bg-[rgba(202,245,222,0.03)] p-3">
-                          <div className="flex items-center justify-between gap-3">
-                            <div className="text-[0.66rem] font-semibold tracking-[0.12em] text-text-muted">TOKEN ID</div>
-                            <button
-                              type="button"
-                              onClick={() => void handleCopy("guideCoinType", step.utilityValue)}
-                              className="border border-border-panel px-2 py-1 text-[0.6rem] tracking-[0.1em] text-mint"
-                            >
-                              {copiedField === "guideCoinType" ? "COPIED" : step.utilityLabel}
-                            </button>
-                          </div>
-                          <div className="mt-2 break-all text-[0.76rem] leading-6 tracking-[0.05em] text-text">
-                            {step.utilityDisplay}
-                          </div>
-                        </div>
-                      ) : null}
-
-                      {"closingLine" in step && step.closingLine ? (
-                        <div className="mt-4 text-[0.73rem] font-semibold leading-5 tracking-[0.09em] text-orange">
-                          {step.closingLine}
-                        </div>
-                      ) : null}
+              {!desktopOnlyMobile && (
+                <div ref={connectGuideRef} className="border border-border-panel bg-[rgba(2,5,3,0.5)] p-5 md:p-6">
+                  <div className="mb-4 text-[0.68rem] font-semibold tracking-[0.13em] text-text-muted">HOW TO CONNECT</div>
+                  <div className="max-w-[32rem] space-y-3">
+                    <div className="text-[0.88rem] font-semibold leading-6 tracking-[0.08em] text-mint">
+                      ONLY FOR THE WALLET TIED TO YOUR FRONTIER RIDER.
                     </div>
-                  ))}
-                </div>
-
-                <div className="mt-5 flex items-center justify-between gap-3 border-t border-border-panel pt-4">
-                  <div className="text-[0.72rem] leading-5 tracking-[0.05em] text-text-dim">
-                    Claim here with the same EVE Vault wallet address your Frontier rider uses.
+                    <div className="text-[0.82rem] leading-6 tracking-[0.05em] text-text-muted">
+                      If you connected the wrong Sui wallet, follow this path and return here to claim.
+                    </div>
                   </div>
-                  <Link
-                    to="/markets/diagnostics"
-                    className="text-[0.68rem] font-semibold tracking-[0.11em] text-mint no-underline"
-                  >
-                    VIEW TRUST DETAILS
-                  </Link>
+
+                  <div className="mt-5 grid gap-4 md:grid-cols-2">
+                    {connectSteps.map((step, index) => (
+                      <div
+                        key={step.label}
+                        className={`flex h-full flex-col border bg-bg-panel p-4 ${
+                          index === 3 ? "border-orange-dim shadow-[0_0_14px_rgba(221,122,31,0.12)]" : "border-border-panel"
+                        }`}
+                      >
+                        <div className={`flex h-40 items-center justify-center border px-4 py-5 md:h-44 ${step.shellClassName}`}>
+                          <img src={step.art} alt={step.artAlt} className={`${step.artClassName} h-auto object-contain`} />
+                        </div>
+                        <div className={`mt-4 text-[0.74rem] font-semibold tracking-[0.13em] ${step.toneClassName}`}>{step.label}</div>
+                        <p className="mt-3 m-0 text-[0.82rem] leading-6 tracking-[0.05em] text-text-muted">{step.copy}</p>
+
+                        {"resourceLinks" in step && step.resourceLinks ? (
+                          <div className="mt-4 flex flex-wrap gap-2">
+                            {step.resourceLinks.map((resource) => (
+                              <a
+                                key={resource.href}
+                                href={resource.href}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center border border-border-panel px-3 py-2 text-[0.68rem] font-semibold tracking-[0.11em] text-mint no-underline transition-all duration-200 hover:bg-[rgba(202,245,222,0.08)]"
+                              >
+                                {resource.label}
+                              </a>
+                            ))}
+                          </div>
+                        ) : null}
+
+                        {"checklist" in step && step.checklist ? (
+                          <div className="mt-4 space-y-2 text-[0.74rem] leading-5 tracking-[0.05em] text-text-muted">
+                            {step.checklist.map((item, checklistIndex) => (
+                              <div key={item}>
+                                {checklistIndex + 1}. {item}
+                              </div>
+                            ))}
+                          </div>
+                        ) : null}
+
+                        {"utilityValue" in step && step.utilityValue ? (
+                          <div className="mt-4 border border-border-panel bg-[rgba(202,245,222,0.03)] p-3">
+                            <div className="flex items-center justify-between gap-3">
+                              <div className="text-[0.66rem] font-semibold tracking-[0.12em] text-text-muted">TOKEN ID</div>
+                              <button
+                                type="button"
+                                onClick={() => void handleCopy("guideCoinType", step.utilityValue)}
+                                className="border border-border-panel px-2 py-1 text-[0.6rem] tracking-[0.1em] text-mint"
+                              >
+                                {copiedField === "guideCoinType" ? "COPIED" : step.utilityLabel}
+                              </button>
+                            </div>
+                            <div className="mt-2 break-all text-[0.76rem] leading-6 tracking-[0.05em] text-text">
+                              {step.utilityDisplay}
+                            </div>
+                          </div>
+                        ) : null}
+
+                        {"closingLine" in step && step.closingLine ? (
+                          <div className="mt-4 text-[0.73rem] font-semibold leading-5 tracking-[0.09em] text-orange">
+                            {step.closingLine}
+                          </div>
+                        ) : null}
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="mt-5 flex items-center justify-between gap-3 border-t border-border-panel pt-4">
+                    <div className="text-[0.72rem] leading-5 tracking-[0.05em] text-text-dim">
+                      Claim here with the same EVE Vault wallet address your Frontier rider uses.
+                    </div>
+                    <Link
+                      to="/markets/diagnostics"
+                      className="text-[0.68rem] font-semibold tracking-[0.11em] text-mint no-underline"
+                    >
+                      VIEW TRUST DETAILS
+                    </Link>
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
           </section>
         </main>

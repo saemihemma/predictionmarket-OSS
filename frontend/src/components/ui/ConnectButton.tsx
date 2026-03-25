@@ -3,10 +3,6 @@ import type { DAppKit, UiWallet } from "@mysten/dapp-kit-core";
 import { Link } from "react-router-dom";
 import { useCurrentAccount, useWallets, useDAppKit } from "@mysten/dapp-kit-react";
 import { formatAddress } from "../../lib/formatting";
-import {
-  connectSelectedWallet,
-  disconnectSelectedWallet,
-} from "../../lib/wallet-session";
 import WalletPicker from "./WalletPicker";
 
 /**
@@ -39,7 +35,7 @@ export default function ConnectButton() {
   const handleConnect = async (wallet: UiWallet) => {
     setConnectingWalletName(wallet.name);
     try {
-      await connectSelectedWallet(dAppKit, wallet);
+      await dAppKit.connectWallet({ wallet });
       setPickerOpen(false);
     } catch (error) {
       console.error("Wallet connection failed:", error);
@@ -50,7 +46,7 @@ export default function ConnectButton() {
 
   const handleDisconnect = async () => {
     try {
-      await disconnectSelectedWallet(dAppKit);
+      await dAppKit.disconnectWallet();
     } catch (error) {
       console.error("Wallet disconnect failed:", error);
     }
@@ -74,7 +70,7 @@ export default function ConnectButton() {
             onClose={() => setPickerOpen(false)}
             onSelect={handleConnect}
             title="CHOOSE YOUR WALLET"
-            description="Pick the wallet you want the Orchestrator to use. Disconnect will stick until you choose again."
+            description="Pick the wallet you want the Orchestrator to use. It only connects after you choose."
           />
         )}
       </>
