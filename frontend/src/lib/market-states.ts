@@ -18,8 +18,7 @@ export type MarketAction =
   | "claim"
   | "refund"
   | "dispute"
-  | "view_dispute_status"
-  | "view_diagnostics";
+  | "view_dispute_status";
 
 export interface ActionMeta {
   action: MarketAction;
@@ -60,9 +59,7 @@ const ACTIONS_BY_STATE: Record<MarketState, ActionMeta[]> = {
   ],
 };
 
-const EMERGENCY_PAUSED_ACTIONS: ActionMeta[] = [
-  { action: "view_diagnostics", label: "VIEW DIAGNOSTICS", primary: false },
-];
+const EMERGENCY_PAUSED_ACTIONS: ActionMeta[] = [];
 
 /**
  * Returns the available actions for a market given its current state.
