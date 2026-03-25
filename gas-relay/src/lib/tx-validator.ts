@@ -11,8 +11,6 @@ import { RateLimiter, extractDisputeRoundId } from "./rate-limiter.js";
 const PM_PACKAGE_ID = process.env.PM_PACKAGE_ID ?? "0x0";
 const MAX_GAS_BUDGET = parseInt(process.env.MAX_GAS_BUDGET ?? "50000000", 10);
 const SUI_FRAMEWORK_PACKAGE_ID = "0x2";
-const COIN_MODULE = "coin";
-const COIN_INTO_BALANCE_FN = "into_balance";
 
 const rateLimiter = new RateLimiter({
   disputeRateLimit: parseInt(process.env.DISPUTE_RATE_LIMIT ?? "100", 10),
@@ -65,6 +63,10 @@ const SPONSORED_CALLS = new Map<string, Set<string>>([
   ["pm_sdvm", new Set(["commit_vote", "reveal_vote", "explicit_abstain", "claim_voter_reward", "cleanup_orphaned_commit"])],
 ]);
 
+const HELPER_MOVE_CALLS = new Map<string, Set<string>>([
+  ["coin", new Set(["into_balance"])],
+]);
+
 type CommandShape = {
   $kind?: string;
   MoveCall?: Record<string, unknown>;
@@ -88,6 +90,66 @@ export interface ValidationResult {
   valid: boolean;
   reason?: string;
   faucetClaim?: boolean;
+}
+
+export function getSponsoredMoveCallVerdict(params: {
+  targetPackage?: string;
+  module?: string;
+  fn?: string;
+  pmPackageId?: string;
+}): ValidationResult {
+  const { targetPackage, module, fn, pmPackageId = PM_PACKAGE_ID } = params;
+
+  if (!targetPackage) {
+    return { valid: false, reason: "MoveCall has missing package id" };
+  }
+
+  if (!module || module.trim() === "") {
+    return { valid: false, reason: "MoveCall has missing or empty module name" };
+  }
+
+  if (!fn || fn.trim() === "") {
+    return { valid: false, reason: "MoveCall has missing or empty function name" };
+  }
+
+  const normalizedTargetPackage = normalizeAddr(targetPackage);
+  const normalizedPmPackageId = normalizeAddr(pmPackageId);
+
+  if (normalizedTargetPackage === normalizedPmPackageId) {
+    const allowedFunctions = SPONSORED_CALLS.get(module);
+    if (!allowedFunctions) {
+      return {
+        valid: false,
+        reason: `MoveCall targets module ${module}, not allowed. Allowed: ${[...SPONSORED_CALLS.keys()].join(", ")}`,
+      };
+    }
+
+    if (!allowedFunctions.has(fn)) {
+      return {
+        valid: false,
+        reason: `MoveCall targets ${module}::${fn}, which is not sponsored for public beta.`,
+      };
+    }
+
+    return { valid: true, faucetClaim: module === "pm_faucet" && fn === "claim" };
+  }
+
+  if (normalizedTargetPackage === SUI_FRAMEWORK_PACKAGE_ID) {
+    const allowedFunctions = HELPER_MOVE_CALLS.get(module);
+    if (!allowedFunctions || !allowedFunctions.has(fn)) {
+      return {
+        valid: false,
+        reason: `MoveCall targets ${targetPackage}::${module}::${fn}, not allowed. Only approved framework helpers are permitted.`,
+      };
+    }
+
+    return { valid: true };
+  }
+
+  return {
+    valid: false,
+    reason: `MoveCall targets package ${targetPackage}, not allowed. Only ${pmPackageId} is permitted.`,
+  };
 }
 
 export async function validateTransactionRequest(
@@ -136,45 +198,14 @@ export async function validateTransactionRequest(
       const targetPackage = moveCall.package ?? moveCall.target?.split("::")[0];
       const module = moveCall.module ?? moveCall.target?.split("::")[1];
       const fn = moveCall.function ?? moveCall.target?.split("::")[2];
+      const verdict = getSponsoredMoveCallVerdict({ targetPackage, module, fn });
+      if (!verdict.valid) {
+        return verdict;
+      }
 
-      if (
-        targetPackage &&
-        normalizeAddr(targetPackage) === normalizeAddr(SUI_FRAMEWORK_PACKAGE_ID) &&
-        module === COIN_MODULE &&
-        fn === COIN_INTO_BALANCE_FN
-      ) {
+      if (normalizeAddr(targetPackage ?? "") === normalizeAddr(SUI_FRAMEWORK_PACKAGE_ID)) {
         usesIntoBalanceHelper = true;
         continue;
-      }
-
-      if (!targetPackage || normalizeAddr(targetPackage) !== normalizeAddr(PM_PACKAGE_ID)) {
-        return {
-          valid: false,
-          reason: `MoveCall targets package ${targetPackage}, not allowed. Only ${PM_PACKAGE_ID} is permitted.`,
-        };
-      }
-
-      if (!module || module.trim() === "") {
-        return { valid: false, reason: "MoveCall has missing or empty module name" };
-      }
-
-      const allowedFunctions = SPONSORED_CALLS.get(module);
-      if (!allowedFunctions) {
-        return {
-          valid: false,
-          reason: `MoveCall targets module ${module}, not allowed. Allowed: ${[...SPONSORED_CALLS.keys()].join(", ")}`,
-        };
-      }
-
-      if (!fn || fn.trim() === "") {
-        return { valid: false, reason: "MoveCall has missing or empty function name" };
-      }
-
-      if (!allowedFunctions.has(fn)) {
-        return {
-          valid: false,
-          reason: `MoveCall targets ${module}::${fn}, which is not sponsored for public beta.`,
-        };
       }
 
       if (module === "pm_market" && fn === "create_and_share_market" && !usesIntoBalanceHelper) {
@@ -184,9 +215,7 @@ export async function validateTransactionRequest(
         };
       }
 
-      if (module === "pm_faucet" && fn === "claim") {
-        faucetClaim = true;
-      }
+      faucetClaim ||= Boolean(verdict.faucetClaim);
 
       if ((module === "pm_sdvm" || module === "pm_dispute") && !disputeRoundId) {
         disputeRoundId = extractDisputeRoundId(txData as Record<string, unknown>, PM_PACKAGE_ID);

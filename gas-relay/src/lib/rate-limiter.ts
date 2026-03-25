@@ -222,6 +222,7 @@ export class RateLimiter {
     this.cleanupTimer = setInterval(() => {
       this.cleanup();
     }, intervalMs);
+    this.cleanupTimer.unref?.();
     console.log(`[RateLimiter] Started periodic cleanup every ${intervalMs}ms`);
   }
 
