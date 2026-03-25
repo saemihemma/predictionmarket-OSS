@@ -159,11 +159,12 @@ export function useSponsoredTransaction() {
 
           let signed;
           try {
-            // Step 2: User signs the exact sponsored transaction bytes returned by the relay.
-            // Passing the base64 bytes avoids wallet-specific rebuild/simulation issues on
-            // sponsored shared-object transactions while preserving the relay's gas setup.
+            // Step 2: Rehydrate the sponsored bytes into a Transaction before signing.
+            // Wallet bridges such as Slush/Web Wallet forward transaction.toJSON() through
+            // a popup channel, and the structured Transaction form is more widely compatible
+            // there than a raw base64 BCS string.
             signed = await dappKit.signTransaction({
-              transaction: sponsored.txBytes,
+              transaction: Transaction.from(sponsored.txBytes),
             });
           } catch (err) {
             if (isWalletApprovalCancelled(err)) {
