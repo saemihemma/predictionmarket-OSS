@@ -1,6 +1,14 @@
-type WizardStep = "title" | "description" | "outcomes" | "dates" | "resolution" | "bond" | "review";
+type WizardStep =
+  | "title"
+  | "description"
+  | "outcomes"
+  | "dates"
+  | "resolution"
+  | "bond"
+  | "review"
+  | "success";
 
-const STEPS: WizardStep[] = ["title", "description", "outcomes", "dates", "resolution", "bond", "review"];
+const STEPS: WizardStep[] = ["title", "description", "outcomes", "dates", "resolution", "bond", "review", "success"];
 
 interface ProgressIndicatorProps {
   currentStep: WizardStep;

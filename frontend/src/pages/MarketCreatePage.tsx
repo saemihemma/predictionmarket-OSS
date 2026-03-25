@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useCurrentAccount } from "@mysten/dapp-kit-react";
+import { useNavigate } from "react-router-dom";
 import TerminalScreen from "../components/terminal/TerminalScreen";
 import TerminalPanel from "../components/terminal/TerminalPanel";
 import PageHeader from "../components/ui/PageHeader";
@@ -44,11 +45,14 @@ import ProgressIndicator from "./create/ProgressIndicator";
 import MarketPreview from "./create/MarketPreview";
 import { formatLocalDateTime, parseLocalDateTime } from "./create/DateTimePicker";
 
-type WizardStep = "title" | "description" | "outcomes" | "dates" | "resolution" | "bond" | "review";
+type FormStep = "title" | "description" | "outcomes" | "dates" | "resolution" | "bond" | "review";
+type WizardStep = FormStep | "success";
 type PublicProfile = "sourceBackedCommunity" | "openCommunity";
-type StepValidationMap = Record<WizardStep, string[]>;
+type StepValidationMap = Record<FormStep, string[]>;
 
-const STEPS: WizardStep[] = ["title", "description", "outcomes", "dates", "resolution", "bond", "review"];
+const FORM_STEPS: FormStep[] = ["title", "description", "outcomes", "dates", "resolution", "bond", "review"];
+const STEPS: WizardStep[] = [...FORM_STEPS, "success"];
+const EXPLORER_BASE_URL = "https://testnet.suivision.xyz/txblock";
 
 const STEP_LABELS: Record<WizardStep, string> = {
   title: "MARKET TITLE",
@@ -58,6 +62,7 @@ const STEP_LABELS: Record<WizardStep, string> = {
   resolution: "COMMUNITY SETTLEMENT",
   bond: "BOND AMOUNT",
   review: "REVIEW & SUBMIT",
+  success: "SUCCESS",
 };
 
 interface FormData {
@@ -72,6 +77,22 @@ interface FormData {
   resolutionRules: string;
   creatorControls: boolean;
   creationBond: string;
+}
+
+function createInitialFormData(): FormData {
+  return {
+    title: "",
+    description: "",
+    marketType: MarketType.BINARY,
+    trustTier: "sourceBackedCommunity",
+    outcomes: ["YES", "NO"],
+    closeDate: "",
+    resolutionSourceType: "Public Document",
+    resolutionSourceUri: "",
+    resolutionRules: "",
+    creatorControls: false,
+    creationBond: "",
+  };
 }
 
 function mapTrustTier(profile: PublicProfile): TrustTier {
@@ -102,27 +123,21 @@ function sanitizeWizardError(error: unknown): string {
   return message;
 }
 
+function buildExplorerUrl(digest: string): string {
+  return `${EXPLORER_BASE_URL}/${digest}`;
+}
+
 export default function MarketCreatePage() {
+  const navigate = useNavigate();
   const account = useCurrentAccount();
   const { executeSponsoredTx } = useSponsoredTransaction();
   const { data: protocolConfig, isLoading: configLoading } = useProtocolRuntimeConfig();
 
   const [step, setStep] = useState<WizardStep>("title");
-  const [formData, setFormData] = useState<FormData>({
-    title: "",
-    description: "",
-    marketType: MarketType.BINARY,
-    trustTier: "sourceBackedCommunity",
-    outcomes: ["YES", "NO"],
-    closeDate: "",
-    resolutionSourceType: "Public Document",
-    resolutionSourceUri: "",
-    resolutionRules: "",
-    creatorControls: false,
-    creationBond: "",
-  });
+  const [formData, setFormData] = useState<FormData>(() => createInitialFormData());
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [successDigest, setSuccessDigest] = useState<string | null>(null);
 
   const patchFormData = (patch: Partial<FormData>) => {
     setSubmitError(null);
@@ -215,7 +230,9 @@ export default function MarketCreatePage() {
 
   const currentStepIndex = STEPS.indexOf(step);
   const isFirstStep = currentStepIndex === 0;
-  const isLastStep = currentStepIndex === STEPS.length - 1;
+  const isReviewStep = step === "review";
+  const isSuccessStep = step === "success";
+  const explorerUrl = successDigest ? buildExplorerUrl(successDigest) : null;
 
   const trimmedTitle = formData.title.trim();
   const trimmedDescription = formData.description.trim();
@@ -359,10 +376,10 @@ export default function MarketCreatePage() {
     trimmedTitle,
   ]);
 
-  const currentStepMessages = validationByStep[step];
+  const currentStepMessages = step === "success" ? [] : validationByStep[step];
   const firstInvalidStep =
-    STEPS.find((candidate) => candidate !== "review" && validationByStep[candidate].length > 0) ?? null;
-  const canAdvance = !isLastStep && currentStepMessages.length === 0 && !submitting;
+    FORM_STEPS.find((candidate) => candidate !== "review" && validationByStep[candidate].length > 0) ?? null;
+  const canAdvance = !isReviewStep && !isSuccessStep && currentStepMessages.length === 0 && !submitting;
   const canSubmit = validationByStep.review.length === 0 && !submitting;
 
   const handleNext = () => {
@@ -377,6 +394,15 @@ export default function MarketCreatePage() {
     if (!isFirstStep) {
       setStep(STEPS[currentStepIndex - 1]);
     }
+  };
+
+  const handleCreateAnother = () => {
+    setSuccessDigest(null);
+    setSubmitError(null);
+    setSubmitting(false);
+    setFormData(createInitialFormData());
+    setStep("title");
+    window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
   const handleSubmit = async () => {
@@ -406,6 +432,7 @@ export default function MarketCreatePage() {
 
     setSubmitting(true);
     setSubmitError(null);
+    setSuccessDigest(null);
 
     try {
       const closeMs = BigInt(closeDateValue.getTime());
@@ -447,7 +474,10 @@ export default function MarketCreatePage() {
         bondAmount: parsedCreationBond,
       });
 
-      await executeSponsoredTx(tx);
+      const result = await executeSponsoredTx(tx);
+      setSuccessDigest(result.digest);
+      setStep("success");
+      window.scrollTo({ top: 0, behavior: "smooth" });
     } catch (error: unknown) {
       const message = sanitizeWizardError(error);
       setSubmitError(message);
@@ -550,6 +580,39 @@ export default function MarketCreatePage() {
                   />
                 )}
 
+                {step === "success" && (
+                  <div className="flex flex-col gap-5 text-base leading-[1.7] text-text">
+                    <div className="space-y-2">
+                      <div className="text-xl font-semibold tracking-[0.12em] text-mint md:text-2xl">
+                        MARKET CREATED SUCCESSFULLY
+                      </div>
+                      <p className="max-w-2xl text-text-dim">
+                        Your market is now live on testnet. You can head back to the market board or start a new one right away.
+                      </p>
+                    </div>
+
+                    <div className="border border-border-panel bg-[rgba(202,245,222,0.05)] px-4 py-4">
+                      <div className="mb-2 text-xs font-medium tracking-[0.12em] text-text-dim">
+                        TRANSACTION ID
+                      </div>
+                      <div className="break-all font-mono text-[0.78rem] leading-[1.8] text-mint">
+                        {successDigest ?? "Pending transaction digest"}
+                      </div>
+                    </div>
+
+                    {explorerUrl && (
+                      <a
+                        href={explorerUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex w-fit border border-tribe-b-dim bg-[rgba(77,184,212,0.12)] px-4 py-3 font-mono text-xs font-semibold tracking-[0.08em] text-tribe-b transition-all duration-200 hover:bg-[rgba(77,184,212,0.2)]"
+                      >
+                        VIEW ON EXPLORER
+                      </a>
+                    )}
+                  </div>
+                )}
+
                 {currentStepMessages.length > 0 && (
                   <div className="border border-orange-dim bg-[rgba(221,122,31,0.08)] px-4 py-3 text-[0.72rem] tracking-[0.08em] text-orange">
                     <div className="mb-2 font-semibold tracking-[0.12em] text-orange">BEFORE YOU CONTINUE</div>
@@ -563,45 +626,62 @@ export default function MarketCreatePage() {
               </div>
             </TerminalPanel>
 
-            <div className="mt-4 flex flex-col gap-2 sm:flex-row">
-              <button
-                onClick={handlePrev}
-                disabled={isFirstStep}
-                className={`touch-target flex-1 border px-4 py-3 font-mono text-xs font-semibold tracking-[0.08em] transition-all duration-200 ${
-                  !isFirstStep
-                    ? "cursor-pointer border-tribe-b-dim bg-[rgba(77,184,212,0.12)] text-tribe-b"
-                    : "cursor-not-allowed border-border-inactive bg-[rgba(0,0,0,0.3)] text-text-dim"
-                }`}
-              >
-                &lt; PREV
-              </button>
+            {isSuccessStep ? (
+              <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+                <button
+                  onClick={() => navigate("/markets")}
+                  className="touch-target flex-1 cursor-pointer border border-mint-dim bg-[rgba(202,245,222,0.15)] px-4 py-3 font-mono text-xs font-semibold tracking-[0.08em] text-mint transition-all duration-200 hover:bg-[rgba(202,245,222,0.24)]"
+                >
+                  RETURN TO MARKET MAIN SCREEN
+                </button>
+                <button
+                  onClick={handleCreateAnother}
+                  className="touch-target flex-1 cursor-pointer border border-tribe-b-dim bg-[rgba(77,184,212,0.12)] px-4 py-3 font-mono text-xs font-semibold tracking-[0.08em] text-tribe-b transition-all duration-200 hover:bg-[rgba(77,184,212,0.2)]"
+                >
+                  CREATE ANOTHER MARKET
+                </button>
+              </div>
+            ) : (
+              <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+                <button
+                  onClick={handlePrev}
+                  disabled={isFirstStep}
+                  className={`touch-target flex-1 border px-4 py-3 font-mono text-xs font-semibold tracking-[0.08em] transition-all duration-200 ${
+                    !isFirstStep
+                      ? "cursor-pointer border-tribe-b-dim bg-[rgba(77,184,212,0.12)] text-tribe-b"
+                      : "cursor-not-allowed border-border-inactive bg-[rgba(0,0,0,0.3)] text-text-dim"
+                  }`}
+                >
+                  &lt; PREV
+                </button>
 
-              {isLastStep ? (
-                <button
-                  onClick={handleSubmit}
-                  disabled={!canSubmit}
-                  className={`touch-target flex-1 border px-4 py-3 font-mono text-xs font-semibold tracking-[0.08em] transition-all duration-200 ${
-                    canSubmit
-                      ? "cursor-pointer border-mint-dim bg-[rgba(202,245,222,0.15)] text-mint"
-                      : "cursor-not-allowed border-border-inactive bg-[rgba(0,0,0,0.3)] text-text-dim"
-                  }`}
-                >
-                  {submitting ? "SUBMITTING..." : "SUBMIT MARKET"}
-                </button>
-              ) : (
-                <button
-                  onClick={handleNext}
-                  disabled={!canAdvance}
-                  className={`touch-target flex-1 border px-4 py-3 font-mono text-xs font-semibold tracking-[0.08em] transition-all duration-200 ${
-                    canAdvance
-                      ? "cursor-pointer border-mint-dim bg-[rgba(202,245,222,0.12)] text-mint hover:bg-[rgba(202,245,222,0.2)]"
-                      : "cursor-not-allowed border-border-inactive bg-[rgba(0,0,0,0.3)] text-text-dim"
-                  }`}
-                >
-                  NEXT &gt;
-                </button>
-              )}
-            </div>
+                {isReviewStep ? (
+                  <button
+                    onClick={handleSubmit}
+                    disabled={!canSubmit}
+                    className={`touch-target flex-1 border px-4 py-3 font-mono text-xs font-semibold tracking-[0.08em] transition-all duration-200 ${
+                      canSubmit
+                        ? "cursor-pointer border-mint-dim bg-[rgba(202,245,222,0.15)] text-mint"
+                        : "cursor-not-allowed border-border-inactive bg-[rgba(0,0,0,0.3)] text-text-dim"
+                    }`}
+                  >
+                    {submitting ? "SUBMITTING..." : "SUBMIT MARKET"}
+                  </button>
+                ) : (
+                  <button
+                    onClick={handleNext}
+                    disabled={!canAdvance}
+                    className={`touch-target flex-1 border px-4 py-3 font-mono text-xs font-semibold tracking-[0.08em] transition-all duration-200 ${
+                      canAdvance
+                        ? "cursor-pointer border-mint-dim bg-[rgba(202,245,222,0.12)] text-mint hover:bg-[rgba(202,245,222,0.2)]"
+                        : "cursor-not-allowed border-border-inactive bg-[rgba(0,0,0,0.3)] text-text-dim"
+                    }`}
+                  >
+                    NEXT &gt;
+                  </button>
+                )}
+              </div>
+            )}
 
             {submitError && (
               <div className="mt-3 border border-orange-dim bg-[rgba(221,122,31,0.08)] px-4 py-3 text-[0.7rem] tracking-[0.08em] text-orange">
@@ -610,7 +690,7 @@ export default function MarketCreatePage() {
             )}
           </div>
 
-          <div className="min-w-0">
+          {!isSuccessStep && <div className="min-w-0">
             <MarketPreview
               title={formData.title}
               description={formData.description}
@@ -621,7 +701,7 @@ export default function MarketCreatePage() {
               resolutionSourceType={formData.resolutionSourceType}
               creationBond={creationBondDisplay}
             />
-          </div>
+          </div>}
         </main>
 
         <Footer />
