@@ -24,6 +24,56 @@ interface SponsoredResult {
   digest: string;
 }
 
+function extractErrorDetail(error: unknown): string {
+  const queue: unknown[] = [error];
+  const seen = new Set<unknown>();
+  const messages: string[] = [];
+
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (current == null || seen.has(current)) {
+      continue;
+    }
+    seen.add(current);
+
+    if (typeof current === "string") {
+      if (current.trim()) {
+        messages.push(current.trim());
+      }
+      continue;
+    }
+
+    if (current instanceof Error) {
+      if (current.message?.trim()) {
+        messages.push(current.message.trim());
+      }
+      queue.push((current as Error & { cause?: unknown }).cause);
+      queue.push((current as Error & { executionError?: unknown }).executionError);
+    }
+
+    if (typeof current !== "object") {
+      continue;
+    }
+
+    const record = current as Record<string, unknown>;
+    for (const key of ["message", "error", "reason", "executionErrorSource"]) {
+      const value = record[key];
+      if (typeof value === "string" && value.trim()) {
+        messages.push(value.trim());
+      }
+    }
+
+    for (const key of ["cause", "executionError", "status", "FailedTransaction", "Transaction"]) {
+      if (key in record) {
+        queue.push(record[key]);
+      }
+    }
+  }
+
+  const uniqueMessages = [...new Set(messages.filter(Boolean))];
+  return uniqueMessages.join(": ") || "Unknown error";
+}
+
 function isWalletApprovalCancelled(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
   const normalized = message.toLowerCase();
@@ -81,10 +131,15 @@ export function useSponsoredTransaction() {
       if (isRelayUp) {
         try {
           // Build TransactionKind (commands only, no gas)
-          const kindBytes = await tx.build({
-            client: suiClient,
-            onlyTransactionKind: true,
-          });
+          let kindBytes: Uint8Array;
+          try {
+            kindBytes = await tx.build({
+              client: suiClient,
+              onlyTransactionKind: true,
+            });
+          } catch (err) {
+            throw new Error(`Local transaction build failed: ${extractErrorDetail(err)}`);
+          }
           const kindB64 = btoa(String.fromCharCode(...kindBytes));
 
           let sponsored;
@@ -95,11 +150,11 @@ export function useSponsoredTransaction() {
             if (shouldTripRelayHealth(err)) {
               relayHealthy.current = false;
               throw new Error(
-                `Sponsored execution unavailable: ${err instanceof Error ? err.message : String(err)}`,
+                `Sponsored execution unavailable: ${extractErrorDetail(err)}`,
               );
             }
 
-            throw err;
+            throw new Error(`Relay sponsor failed: ${extractErrorDetail(err)}`);
           }
 
           let signed;
@@ -114,7 +169,7 @@ export function useSponsoredTransaction() {
             if (isWalletApprovalCancelled(err)) {
               throw new Error("Wallet approval was cancelled.");
             }
-            throw err;
+            throw new Error(`Wallet signing failed: ${extractErrorDetail(err)}`);
           }
 
           try {
@@ -125,11 +180,11 @@ export function useSponsoredTransaction() {
             if (shouldTripRelayHealth(err)) {
               relayHealthy.current = false;
               throw new Error(
-                `Sponsored execution unavailable: ${err instanceof Error ? err.message : String(err)}`,
+                `Sponsored execution unavailable: ${extractErrorDetail(err)}`,
               );
             }
 
-            throw err;
+            throw new Error(`Relay execute failed: ${extractErrorDetail(err)}`);
           }
         } catch (err) {
           console.warn("[sponsored-tx] Relay execution failed:", err);
