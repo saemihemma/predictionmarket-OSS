@@ -187,9 +187,44 @@ export async function executeRoute(req: Request, res: Response): Promise<void> {
       events: result.events,
     });
   } catch (err) {
+    const baseMessage = err instanceof Error ? err.message : "Internal execution error";
+    let diagnosticMessage: string | null = null;
+    let diagnosticSource: string | null = null;
+
+    if (txBytes) {
+      try {
+        const dryRun = await suiClient.dryRunTransactionBlock({
+          transactionBlock: txBytes,
+        });
+
+        const status = dryRun.effects?.status;
+        diagnosticMessage =
+          (status?.status === "failure" && status.error?.trim()) ||
+          dryRun.executionErrorSource?.trim() ||
+          null;
+        diagnosticSource = dryRun.executionErrorSource?.trim() || null;
+
+        if (diagnosticMessage) {
+          console.error("[gas-relay] execute dry-run diagnostic:", {
+            message: diagnosticMessage,
+            source: diagnosticSource,
+          });
+        }
+      } catch (dryRunErr) {
+        diagnosticMessage = dryRunErr instanceof Error ? dryRunErr.message : String(dryRunErr);
+        console.error("[gas-relay] execute dry-run diagnostic failed:", dryRunErr);
+      }
+    }
+
+    const errorMessage =
+      diagnosticMessage && !baseMessage.includes(diagnosticMessage)
+        ? `${baseMessage}: ${diagnosticMessage}`
+        : baseMessage;
+
     console.error("[gas-relay] execute error:", err);
-    res.status(500).json({
-      error: err instanceof Error ? err.message : "Internal execution error",
+    res.status(diagnosticMessage ? 400 : 500).json({
+      error: errorMessage,
+      reason: diagnosticSource ?? undefined,
     });
   } finally {
     // ALWAYS return the leased coin, success or failure
