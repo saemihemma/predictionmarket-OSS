@@ -35,7 +35,7 @@ export default function ClaimButton({
           isClaiming && "claim-glow-pulse cursor-wait border border-mint bg-bg-panel text-mint",
           !isClaimed &&
             !isClaiming &&
-            "cursor-pointer border border-border-panel bg-[rgba(202,245,222,0.06)] text-mint hover:border-mint-dim hover:shadow-[0_0_10px_rgba(202,245,222,0.12)]",
+            "border border-border-panel bg-[rgba(202,245,222,0.06)] text-mint hover:border-mint-dim hover:shadow-[0_0_10px_rgba(202,245,222,0.12)]",
         )}
         disabled={isClaimed || isClaiming}
       >

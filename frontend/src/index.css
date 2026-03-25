@@ -331,6 +331,12 @@ textarea::placeholder {
 
 /* ─── Focus Indicators ───────────────────────────────────────────────── */
 
+button:not(:disabled),
+a[href],
+[role="button"]:not([aria-disabled="true"]) {
+  cursor: pointer;
+}
+
 button:focus-visible,
 a:focus-visible,
 input:focus-visible,
