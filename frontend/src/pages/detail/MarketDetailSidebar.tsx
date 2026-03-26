@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { MarketState, Position } from "../../lib/market-types";
-import { computeBuyCost, computePriceImpactBps, computeSellProceeds } from "../../lib/amm";
+import { computeBuyCost, computeBuyPriceImpactBps, computeSellPriceImpactBps, computeSellProceeds } from "../../lib/amm";
 import {
   buildBuyMergeTransaction,
   buildBuyTransaction,
@@ -13,6 +13,7 @@ import { formatShareLabel, parseShareInput } from "../../lib/shares";
 import type { TradeSuccessPayload } from "../../lib/trade-success";
 import { useProtocolRuntimeConfig } from "../../hooks/useProtocolRuntimeConfig";
 import { useSponsoredTransaction } from "../../hooks/useSponsoredTransaction";
+import { deriveTradeUiState, normalizeTradeQuoteError, type TradeQuoteState } from "./trade-sidebar-state";
 
 const DEFAULT_SLIPPAGE_BPS = 500n;
 const DEADLINE_WINDOW_MS = 10 * 60 * 1000;
@@ -63,6 +64,8 @@ export default function MarketDetailSidebar({
   const { data: protocolConfig } = useProtocolRuntimeConfig();
   const [tradePending, setTradePending] = useState(false);
   const [tradeError, setTradeError] = useState<string | null>(null);
+  const outcomeLabel = market.outcomeLabels[selectedOutcome] ?? `Outcome ${selectedOutcome + 1}`;
+  const selectedReserve = market.outcomeQuantities[selectedOutcome] ?? null;
 
   const selectedPosition = useMemo(
     () => positions.find((position) => position.outcomeIndex === selectedOutcome),
@@ -86,12 +89,24 @@ export default function MarketDetailSidebar({
   const shareInputError = parsedTradeInput.error;
   const tradingFeeBps = protocolConfig ? BigInt(protocolConfig.tradingFeeBps) : 0n;
 
-  const quote = useMemo(() => {
+  const quote = useMemo<TradeQuoteState>(() => {
     if (shareInputError) {
-      return { error: shareInputError };
+      return {
+        kind: "error",
+        rawMessage: shareInputError,
+        message: shareInputError,
+      };
     }
 
     if (parsedTradeAmount <= 0n) {
+      return null;
+    }
+
+    if (tradeType === "sell" && !selectedPosition) {
+      return null;
+    }
+
+    if (tradeType === "sell" && selectedPosition && parsedTradeAmount > selectedPosition.quantity) {
       return null;
     }
 
@@ -101,51 +116,73 @@ export default function MarketDetailSidebar({
         const fee = computeFee(cost, tradingFeeBps);
         const totalCost = cost + fee;
         return {
+          kind: "success",
           grossAmount: cost,
           netAmount: totalCost,
           fee,
-          priceImpactBps: computePriceImpactBps(market.outcomeQuantities, selectedOutcome, parsedTradeAmount),
+          priceImpactBps: computeBuyPriceImpactBps(market.outcomeQuantities, selectedOutcome, parsedTradeAmount),
         };
       }
 
       const proceeds = computeSellProceeds(market.outcomeQuantities, selectedOutcome, parsedTradeAmount);
       const fee = computeFee(proceeds, tradingFeeBps);
       return {
+        kind: "success",
         grossAmount: proceeds,
         netAmount: proceeds - fee,
         fee,
-        priceImpactBps: computePriceImpactBps(market.outcomeQuantities, selectedOutcome, parsedTradeAmount),
+        priceImpactBps: computeSellPriceImpactBps(market.outcomeQuantities, selectedOutcome, parsedTradeAmount),
       };
     } catch (error) {
+      const rawMessage = error instanceof Error ? error.message : "Unable to quote trade.";
       return {
-        error: error instanceof Error ? error.message : "Unable to quote trade.",
+        kind: "error",
+        rawMessage,
+        message: normalizeTradeQuoteError({
+          tradeType,
+          rawMessage,
+          outcomeLabel,
+          selectedReserve,
+        }),
       };
     }
-  }, [market.outcomeQuantities, parsedTradeAmount, selectedOutcome, shareInputError, tradeType, tradingFeeBps]);
+  }, [
+    market.outcomeQuantities,
+    outcomeLabel,
+    parsedTradeAmount,
+    selectedOutcome,
+    selectedPosition,
+    selectedReserve,
+    shareInputError,
+    tradeType,
+    tradingFeeBps,
+  ]);
+
+  const tradeUiState = useMemo(
+    () =>
+      deriveTradeUiState({
+        account,
+        tradePending,
+        tradeType,
+        parsedTradeAmount,
+        shareInputError,
+        selectedPositionQuantity: selectedPosition?.quantity ?? null,
+        outcomeLabel,
+        quote,
+      }),
+    [account, outcomeLabel, parsedTradeAmount, quote, selectedPosition, shareInputError, tradePending, tradeType],
+  );
 
   const handleExecuteTrade = async () => {
-    if (!account) {
-      setTradeError("Connect wallet to trade.");
+    if (tradePending) {
       return;
     }
-    if (shareInputError) {
-      setTradeError(shareInputError);
+    if (!tradeUiState.canTrade) {
+      setTradeError(tradeUiState.disabledReason ?? "Unable to trade right now.");
       return;
     }
-    if (parsedTradeAmount <= 0n) {
-      setTradeError("Enter a trade amount first.");
-      return;
-    }
-    if (tradeType === "sell" && !selectedPosition) {
-      setTradeError("No position found for that outcome.");
-      return;
-    }
-    if (tradeType === "sell" && selectedPosition && parsedTradeAmount > selectedPosition.quantity) {
-      setTradeError("Sell amount exceeds your current position.");
-      return;
-    }
-    if (quote && "error" in quote) {
-      setTradeError(quote.error ?? "Unable to quote trade.");
+    if (!account || quote?.kind !== "success") {
+      setTradeError("Unable to quote trade.");
       return;
     }
 
@@ -158,16 +195,16 @@ export default function MarketDetailSidebar({
           ? (selectedPosition?.quantity ?? 0n) + parsedTradeAmount
           : (selectedPosition?.quantity ?? 0n) - parsedTradeAmount;
       const baseTradeSuccessPayload = {
-        outcomeLabel: market.outcomeLabels[selectedOutcome] ?? `Outcome ${selectedOutcome + 1}`,
+        outcomeLabel,
         shareCount: parsedTradeAmount,
-        netAmount: quote?.netAmount ?? 0n,
-        feeAmount: quote?.fee ?? 0n,
+        netAmount: quote.netAmount,
+        feeAmount: quote.fee,
         resultingPositionShares,
       };
 
       if (tradeType === "buy") {
         const inventory = await fetchCollateralCoins(account);
-        const required = quote?.netAmount ?? 0n;
+        const required = quote.netAmount;
         if (inventory.totalBalance < required) {
           throw new Error(`Not enough ${COLLATERAL_SYMBOL} available for this trade.`);
         }
@@ -202,7 +239,7 @@ export default function MarketDetailSidebar({
           ...baseTradeSuccessPayload,
         });
       } else if (selectedPosition) {
-        const minProceeds = applySlippage(quote?.netAmount ?? 0n, DEFAULT_SLIPPAGE_BPS, "down");
+        const minProceeds = applySlippage(quote.netAmount, DEFAULT_SLIPPAGE_BPS, "down");
         const deadlineMs = BigInt(Date.now() + DEADLINE_WINDOW_MS);
         const tx = buildSellTransaction({
           marketId: market.id,
@@ -226,14 +263,6 @@ export default function MarketDetailSidebar({
       setTradePending(false);
     }
   };
-
-  const canTrade =
-    Boolean(account) &&
-    parsedTradeAmount > 0n &&
-    !shareInputError &&
-    !tradePending &&
-    !(quote && "error" in quote) &&
-    (tradeType === "buy" || Boolean(selectedPosition));
 
   return (
     <div className="flex flex-col gap-6">
@@ -318,7 +347,7 @@ export default function MarketDetailSidebar({
               />
             </div>
 
-            {quote && !("error" in quote) && (
+            {tradeUiState.showQuoteSummary && quote?.kind === "success" && (
               <div className="border border-tribe-b-dim bg-[rgba(77,184,212,0.08)] px-3 py-2 text-[0.95rem] text-text">
                 <div className="mb-1 flex justify-between gap-4">
                   <span>{tradeType === "buy" ? "Total Cost" : "Net Proceeds"}:</span>
@@ -335,37 +364,46 @@ export default function MarketDetailSidebar({
               </div>
             )}
 
-            {quote && "error" in quote && (
+            {tradeUiState.quoteError && (
               <div className="border border-orange-dim bg-[rgba(221,122,31,0.08)] px-3 py-2 text-[0.95rem] text-orange">
-                {quote.error}
+                {tradeUiState.quoteError}
               </div>
             )}
 
-            <button
-              disabled={!canTrade}
-              onClick={handleExecuteTrade}
-              className={`touch-target min-h-11 border px-3 py-2 font-mono text-sm font-semibold tracking-[0.08em] transition-all duration-200 ${
-                canTrade
-                  ? tradeType === "buy"
-                    ? "cursor-pointer border-mint-dim bg-[rgba(202,245,222,0.12)] text-mint"
-                    : "cursor-pointer border-tribe-b-dim bg-[rgba(77,184,212,0.12)] text-tribe-b"
-                  : "cursor-not-allowed border-border-panel bg-[rgba(0,0,0,0.3)] text-text-dim"
-              }`}
-            >
-              {!account
-                ? "CONNECT WALLET"
-                : tradePending
-                  ? "PROCESSING..."
-                  : `${tradeType === "buy" ? "BUY" : "SELL"} ${market.outcomeLabels[selectedOutcome]}`}
-            </button>
+            <div className="group relative">
+              {tradeUiState.tooltipText && !tradePending && (
+                <div className="pointer-events-none absolute inset-x-0 bottom-full z-10 mb-2 hidden border border-orange-dim bg-bg-panel px-3 py-2 text-xs leading-relaxed text-orange shadow-[0_0_12px_rgba(221,122,31,0.12)] group-hover:block">
+                  {tradeUiState.tooltipText}
+                </div>
+              )}
+              <button
+                disabled={!tradeUiState.canTrade}
+                onClick={handleExecuteTrade}
+                className={`touch-target min-h-11 w-full border px-3 py-2 font-mono text-sm font-semibold tracking-[0.08em] transition-all duration-200 ${
+                  tradeUiState.canTrade
+                    ? tradeType === "buy"
+                      ? "cursor-pointer border-mint-dim bg-[rgba(202,245,222,0.12)] text-mint"
+                      : "cursor-pointer border-tribe-b-dim bg-[rgba(77,184,212,0.12)] text-tribe-b"
+                    : "cursor-not-allowed border-border-panel bg-[rgba(0,0,0,0.3)] text-text-dim"
+                }`}
+              >
+                {!account
+                  ? "CONNECT WALLET"
+                  : tradePending
+                    ? "PROCESSING..."
+                    : `${tradeType === "buy" ? "BUY" : "SELL"} ${outcomeLabel}`}
+              </button>
+            </div>
+
+            {tradeUiState.helperText && (
+              <div className="text-center text-sm leading-relaxed text-text-muted">{tradeUiState.helperText}</div>
+            )}
 
             {tradeError && (
               <div className="border border-orange-dim bg-[rgba(221,122,31,0.08)] px-3 py-2 text-center text-sm text-orange">
                 {tradeError}
               </div>
             )}
-
-            {!account && <div className="text-center text-sm text-text-muted">Connect wallet to trade</div>}
           </div>
         </div>
       ) : (

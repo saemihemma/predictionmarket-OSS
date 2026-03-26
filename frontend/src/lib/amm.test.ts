@@ -1,12 +1,56 @@
 /**
  * CPMM parity tests — proves amm.ts matches pm_math.move for identical inputs.
- * Consumes shared test vectors from amm-test-vectors.json.
- *
  * Run: npx vitest run src/lib/amm.test.ts
  */
 import { describe, it, expect } from "vitest";
-import { computeBuyCost, computeSellProceeds, outcomeProbabilityBps } from "./amm";
-import vectors from "./amm-test-vectors.json";
+import { computeBuyCost, computeSellPriceImpactBps, computeSellProceeds, outcomeProbabilityBps } from "./amm";
+
+const vectors = {
+  buy: [
+    {
+      label: "equal reserves buy 10% of the pool",
+      reserves: [1_000_000_000, 1_000_000_000],
+      outcomeIndex: 0,
+      amount: 100_000_000,
+      expectedCost: 111_111_112,
+    },
+    {
+      label: "skewed reserves buy favors the higher-probability side",
+      reserves: [500_000_000, 1_500_000_000],
+      outcomeIndex: 0,
+      amount: 100_000_000,
+      expectedCost: 375_000_000,
+    },
+  ],
+  sell: [
+    {
+      label: "equal reserves sell 10% of the pool",
+      reserves: [1_000_000_000, 1_000_000_000],
+      outcomeIndex: 0,
+      amount: 100_000_000,
+      expectedProceeds: 90_909_090,
+    },
+    {
+      label: "skewed reserves sell returns less against deeper conviction",
+      reserves: [500_000_000, 1_500_000_000],
+      outcomeIndex: 0,
+      amount: 100_000_000,
+      expectedProceeds: 250_000_000,
+    },
+  ],
+  probability: [
+    {
+      label: "equal reserves imply 50/50 odds",
+      reserves: [1_000_000_000, 1_000_000_000],
+      expectedBps: [5000, 5000],
+    },
+    {
+      label: "lower reserve implies higher probability",
+      reserves: [500_000_000, 1_500_000_000],
+      expectedBps: [7500, 2500],
+    },
+  ],
+} as const;
 
 describe("CPMM parity: computeBuyCost matches pm_math::cp_buy_cost", () => {
   for (const v of vectors.buy) {
@@ -97,5 +141,13 @@ describe("CPMM edge cases", () => {
     // Reserve is zero: undefined state, but should not crash
     expect(bps).toBeDefined();
     expect(bps.length).toBe(2);
+  });
+
+  it("sell-side price impact stays bounded on skewed reserves", () => {
+    expect(computeSellPriceImpactBps([1n, 10_000n], 1, 1n)).toBe(10000);
+  });
+
+  it("live-like reserve exhaustion rejects buying the last whole share", () => {
+    expect(() => computeBuyCost([1n, 10_000n], 0, 1n)).toThrow("exceeds pool reserve");
   });
 });

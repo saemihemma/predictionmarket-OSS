@@ -141,7 +141,15 @@ export function outcomeProbabilityBps(outcomeQuantities: bigint[]): number[] {
  *
  * Impact = (execution_price - spot_price) / spot_price * 10000
  */
-export function computePriceImpactBps(
+function computeSpotPrice(outcomeQuantities: bigint[], outcomeIndex: number): number {
+  const n = outcomeQuantities.length;
+  if (n < 2 || outcomeIndex < 0 || outcomeIndex >= n) return 0;
+
+  const probBps = outcomeProbabilityBps(outcomeQuantities);
+  return probBps[outcomeIndex] / 10000;
+}
+
+export function computeBuyPriceImpactBps(
   outcomeQuantities: bigint[],
   outcomeIndex: number,
   quantity: bigint,
@@ -153,8 +161,7 @@ export function computePriceImpactBps(
   const rTarget = outcomeQuantities[outcomeIndex];
   if (quantity >= rTarget) return 10000;
 
-  const probBps = outcomeProbabilityBps(outcomeQuantities);
-  const spotPrice = probBps[outcomeIndex] / 10000;
+  const spotPrice = computeSpotPrice(outcomeQuantities, outcomeIndex);
   if (spotPrice <= 0) return 0;
 
   const cost = computeBuyCost(outcomeQuantities, outcomeIndex, quantity);
@@ -162,6 +169,33 @@ export function computePriceImpactBps(
 
   const impact = ((execPrice - spotPrice) / spotPrice) * 10000;
   return Math.round(Math.max(0, impact));
+}
+
+export function computeSellPriceImpactBps(
+  outcomeQuantities: bigint[],
+  outcomeIndex: number,
+  quantity: bigint,
+): number {
+  if (quantity <= 0n) return 0;
+  const n = outcomeQuantities.length;
+  if (n < 2 || outcomeIndex < 0 || outcomeIndex >= n) return 0;
+
+  const spotPrice = computeSpotPrice(outcomeQuantities, outcomeIndex);
+  if (spotPrice <= 0) return 0;
+
+  const proceeds = computeSellProceeds(outcomeQuantities, outcomeIndex, quantity);
+  const execPrice = Number(proceeds) / Number(quantity);
+
+  const impact = ((spotPrice - execPrice) / spotPrice) * 10000;
+  return Math.round(Math.max(0, impact));
+}
+
+export function computePriceImpactBps(
+  outcomeQuantities: bigint[],
+  outcomeIndex: number,
+  quantity: bigint,
+): number {
+  return computeBuyPriceImpactBps(outcomeQuantities, outcomeIndex, quantity);
 }
 
 /**
