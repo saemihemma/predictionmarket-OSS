@@ -22,6 +22,7 @@ import {
   parseCollateralInput,
 } from "../lib/collateral";
 import { COLLATERAL_SYMBOL } from "../lib/market-constants";
+import { buildTransactionExplorerUrl } from "../lib/explorer";
 import { getMarketTypePolicyId, hasLiveProtocolDeployment } from "../lib/protocol-config";
 import {
   getCreationBondMinRawFromConfig,
@@ -52,7 +53,6 @@ type StepValidationMap = Record<FormStep, string[]>;
 
 const FORM_STEPS: FormStep[] = ["title", "description", "outcomes", "dates", "resolution", "bond", "review"];
 const STEPS: WizardStep[] = [...FORM_STEPS, "success"];
-const EXPLORER_BASE_URL = "https://testnet.suivision.xyz/txblock";
 
 const STEP_LABELS: Record<WizardStep, string> = {
   title: "MARKET TITLE",
@@ -121,10 +121,6 @@ function sanitizeWizardError(error: unknown): string {
   }
 
   return message;
-}
-
-function buildExplorerUrl(digest: string): string {
-  return `${EXPLORER_BASE_URL}/${digest}`;
 }
 
 export default function MarketCreatePage() {
@@ -232,7 +228,7 @@ export default function MarketCreatePage() {
   const isFirstStep = currentStepIndex === 0;
   const isReviewStep = step === "review";
   const isSuccessStep = step === "success";
-  const explorerUrl = successDigest ? buildExplorerUrl(successDigest) : null;
+  const explorerUrl = successDigest ? buildTransactionExplorerUrl(successDigest) : null;
 
   const trimmedTitle = formData.title.trim();
   const trimmedDescription = formData.description.trim();

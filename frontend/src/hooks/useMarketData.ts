@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { Market, MarketState, parseMarketFromSuiObject } from "../lib/market-types";
+import { hydrateMarketsWithLifecycle } from "../lib/market-lifecycle";
 import { PM_POSITION_TYPE } from "../lib/market-constants";
 import { fetchProtocolRuntimeConfig } from "../lib/protocol-runtime";
 import { protocolReadTransport } from "../lib/client";
@@ -41,10 +42,16 @@ async function fetchMarketObjects(marketIds: string[]): Promise<Market[]> {
     marketBatches.map((ids) => protocolReadTransport.getObjects(ids)),
   );
 
-  return batchResults
+  const parsedMarkets = batchResults
     .flat()
     .map((result) => parseMarketFromSuiObject(result))
     .filter((market): market is Market => market !== null);
+
+  try {
+    return await hydrateMarketsWithLifecycle(parsedMarkets);
+  } catch {
+    return parsedMarkets;
+  }
 }
 
 export function useAllMarkets() {
@@ -111,7 +118,15 @@ export function useMarketData(id: string) {
 
       const parsed = parseMarketFromSuiObject(data);
       if (parsed) {
-        setMarket(enrichMarket(parsed, protocolConfig.creatorPriorityWindowMs));
+        let hydrated = parsed;
+        try {
+          const [enriched] = await hydrateMarketsWithLifecycle([parsed]);
+          hydrated = enriched ?? parsed;
+        } catch {
+          hydrated = parsed;
+        }
+
+        setMarket(enrichMarket(hydrated, protocolConfig.creatorPriorityWindowMs));
       } else {
         setMarket(undefined);
       }

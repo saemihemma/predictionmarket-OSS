@@ -11,6 +11,10 @@ export default function MarketDetailPending({
   disputeReason,
   setDisputeReason,
   onSubmitDispute,
+  canFinalizeResolution,
+  onFinalizeResolution,
+  finalizePending,
+  finalizeError,
   isSubmitting,
   error,
 }: {
@@ -23,6 +27,10 @@ export default function MarketDetailPending({
   disputeReason: string;
   setDisputeReason: (s: string) => void;
   onSubmitDispute: () => void | Promise<void>;
+  canFinalizeResolution: boolean;
+  onFinalizeResolution: () => void | Promise<void>;
+  finalizePending: boolean;
+  finalizeError: string | null;
   isSubmitting: boolean;
   error: string | null;
 }) {
@@ -37,7 +45,8 @@ export default function MarketDetailPending({
     100,
     Math.max(0, ((Date.now() - resolution.resolvedAtMs) / disputeWindowDuration) * 100),
   );
-  const canSubmitDispute = Boolean(disputeReason) && !isSubmitting;
+  const disputeWindowOpen = Date.now() < resolution.disputeWindowEndMs;
+  const canSubmitDispute = Boolean(disputeReason) && !isSubmitting && disputeWindowOpen;
 
   return (
     <>
@@ -80,10 +89,42 @@ export default function MarketDetailPending({
 
         <button
           onClick={() => setDisputeExpanded(!disputeExpanded)}
-          className="touch-target min-h-11 w-full border border-orange bg-[rgba(221,122,31,0.12)] px-3 py-2 font-mono text-sm font-semibold tracking-[0.08em] text-orange transition-all duration-200 hover:shadow-[0_0_12px_rgba(221,122,31,0.3)]"
+          disabled={!disputeWindowOpen}
+          className={`touch-target min-h-11 w-full border px-3 py-2 font-mono text-sm font-semibold tracking-[0.08em] transition-all duration-200 ${
+            disputeWindowOpen
+              ? "border-orange bg-[rgba(221,122,31,0.12)] text-orange hover:shadow-[0_0_12px_rgba(221,122,31,0.3)]"
+              : "cursor-not-allowed border-border-panel bg-[rgba(0,0,0,0.3)] text-text-dim"
+          }`}
         >
-          {disputeExpanded ? "CANCEL" : "DISPUTE THIS OUTCOME"}
+          {!disputeWindowOpen ? "DISPUTE WINDOW CLOSED" : disputeExpanded ? "CANCEL" : "DISPUTE THIS OUTCOME"}
         </button>
+
+        {canFinalizeResolution && (
+          <div className="mt-3 border border-mint-dim bg-[rgba(202,245,222,0.08)] px-3 py-3">
+            <div className="mb-2 text-sm font-semibold tracking-[0.06em] text-mint">FINALIZATION READY</div>
+            <div className="mb-3 text-sm text-text">
+              The dispute window has ended without an open challenge. Anyone can finalize this resolution on-chain now.
+            </div>
+            {finalizeError && (
+              <div className="mb-3 border border-orange-dim bg-[rgba(221,122,31,0.08)] px-3 py-2 text-sm text-orange">
+                {finalizeError}
+              </div>
+            )}
+            <button
+              onClick={() => {
+                void onFinalizeResolution();
+              }}
+              disabled={finalizePending}
+              className={`touch-target min-h-11 w-full border px-3 py-2 font-mono text-sm font-semibold tracking-[0.08em] ${
+                finalizePending
+                  ? "cursor-not-allowed border-border-panel bg-[rgba(0,0,0,0.3)] text-text-dim"
+                  : "border-mint-dim bg-[rgba(202,245,222,0.12)] text-mint"
+              }`}
+            >
+              {finalizePending ? "FINALIZING" : "FINALIZE RESOLUTION"}
+            </button>
+          </div>
+        )}
       </div>
 
       {disputeExpanded && (

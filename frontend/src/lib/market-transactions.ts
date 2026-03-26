@@ -6,6 +6,7 @@ import {
   PM_REGISTRY_ID,
   PM_RESOLVER_POLICY_ID,
   PM_RESOLVER_SET_ID,
+  PM_STAKING_POOL_ID,
   PM_TREASURY_ID,
 } from "./market-constants";
 import {
@@ -328,6 +329,61 @@ export function buildDisputeTransaction(params: {
   return tx;
 }
 
+export function buildFileAndShareDisputeTransaction(params: {
+  marketId: string;
+  proposedOutcome: number;
+  reasonHash: Uint8Array;
+  bondCoinIds: string[];
+  resolverSetId?: string;
+}): Transaction {
+  const pkg = assertProtocolPackageId();
+  if (params.reasonHash.length !== 32) {
+    throw new Error(`Evidence hash must be exactly 32 bytes, got ${params.reasonHash.length}`);
+  }
+
+  const tx = new Transaction();
+  const bondCoin = mergeCoinInputs(tx, params.bondCoinIds);
+  const resolverSetId = params.resolverSetId ?? PM_RESOLVER_SET_ID;
+
+  tx.moveCall({
+    target: `${pkg}::pm_dispute::file_and_share_dispute`,
+    typeArguments: [COLLATERAL_COIN_TYPE],
+    arguments: [
+      tx.object(params.marketId),
+      tx.object(requireConfigId()),
+      tx.object(assertConfiguredId(resolverSetId, "Resolver set ID")),
+      tx.pure.u16(params.proposedOutcome),
+      tx.pure("vector<u8>", Array.from(params.reasonHash)),
+      bondCoin,
+      tx.object(SUI_CLOCK_OBJECT_ID),
+    ],
+  });
+
+  return tx;
+}
+
+export function buildCreateAndShareSdvmVoteRoundTransaction(params: {
+  disputeId: string;
+  expedited?: boolean;
+  stakePoolId?: string;
+}): Transaction {
+  const pkg = assertProtocolPackageId();
+  const tx = new Transaction();
+
+  tx.moveCall({
+    target: `${pkg}::pm_dispute::create_and_share_sdvm_vote_round`,
+    typeArguments: [COLLATERAL_COIN_TYPE],
+    arguments: [
+      tx.object(params.disputeId),
+      tx.object(assertConfiguredId(params.stakePoolId ?? PM_STAKING_POOL_ID, "Staking pool ID")),
+      tx.pure.bool(params.expedited ?? false),
+      tx.object(SUI_CLOCK_OBJECT_ID),
+    ],
+  });
+
+  return tx;
+}
+
 export function buildProposeResolutionTransaction(params: {
   marketId: string;
   outcome: number;
@@ -436,6 +492,29 @@ export function buildFinalizeResolutionTransaction(params: {
     target: `${pkg}::pm_resolution::finalize_resolution`,
     typeArguments: [COLLATERAL_COIN_TYPE],
     arguments: [tx.object(params.marketId), tx.object(SUI_CLOCK_OBJECT_ID)],
+  });
+
+  return tx;
+}
+
+export function buildResolveFromSdvmTransaction(params: {
+  disputeId: string;
+  marketId: string;
+  roundId: string;
+  treasuryId?: string;
+}): Transaction {
+  const pkg = assertProtocolPackageId();
+  const tx = new Transaction();
+
+  tx.moveCall({
+    target: `${pkg}::pm_dispute::resolve_from_sdvm`,
+    typeArguments: [COLLATERAL_COIN_TYPE],
+    arguments: [
+      tx.object(params.disputeId),
+      tx.object(params.marketId),
+      tx.object(assertConfiguredId(params.treasuryId ?? PM_TREASURY_ID, "Treasury ID")),
+      tx.object(params.roundId),
+    ],
   });
 
   return tx;

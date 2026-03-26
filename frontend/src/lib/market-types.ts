@@ -189,31 +189,39 @@ export interface ProposalData {
   proposerAddress: string;
   proposerType: "CREATOR" | "COMMUNITY";
   submittedAtMs: number;
-  evidenceUrl: string;
+  evidenceHash: string;
   note?: string;
   disputeWindowEndMs: number;
-  creationBondAmount: number;
+  creationBondAmount?: number;
 }
 
 /** Dispute filed against a proposal */
 export interface DisputeData {
+  id: string;
   disputer: string;
   proposedOutcomeId: number;
-  reasonText: string;
+  reasonHash: string;
   filedAtMs: number;
   bondAmount: number;
+  state: number;
+  escalationDeadlineMs: number;
+  sdvmVoteRoundId?: string | null;
 }
 
 /** SDVM voting phase data */
 export interface SDVMData {
-  phase: "COMMIT" | "REVEAL" | "TALLY";
-  phaseStartMs: number;
-  phaseEndMs: number;
-  commitDeadlineMs?: number;
-  revealDeadlineMs?: number;
-  talliedOutcome?: number;
+  roundId: string;
+  disputeId: string;
+  roundNumber: number;
+  phase: "COMMIT" | "REVEAL" | "TALLY" | "SETTLED";
+  commitDeadlineMs: number;
+  revealDeadlineMs: number;
+  hardDeadlineMs: number;
+  talliedOutcome?: number | null;
   participantCount: number;
   totalStakeParticipating: number;
+  totalStakeSnapshot: number;
+  expedited: boolean;
   userVote?: {
     outcome: number;
     isRevealed: boolean;

@@ -10,6 +10,7 @@ import {
 import { fetchCollateralCoins, formatCollateralAmount } from "../../lib/collateral";
 import { COLLATERAL_SYMBOL } from "../../lib/market-constants";
 import { formatShareLabel, parseShareInput } from "../../lib/shares";
+import type { TradeSuccessPayload } from "../../lib/trade-success";
 import { useProtocolRuntimeConfig } from "../../hooks/useProtocolRuntimeConfig";
 import { useSponsoredTransaction } from "../../hooks/useSponsoredTransaction";
 
@@ -56,7 +57,7 @@ export default function MarketDetailSidebar({
   account: string | null;
   voteExpanded: boolean;
   positions: Position[];
-  onTradeSuccess: () => void | Promise<void>;
+  onTradeSuccess: (payload: TradeSuccessPayload) => void | Promise<void>;
 }) {
   const { executeSponsoredTx } = useSponsoredTransaction();
   const { data: protocolConfig } = useProtocolRuntimeConfig();
@@ -152,6 +153,18 @@ export default function MarketDetailSidebar({
     setTradeError(null);
 
     try {
+      const resultingPositionShares =
+        tradeType === "buy"
+          ? (selectedPosition?.quantity ?? 0n) + parsedTradeAmount
+          : (selectedPosition?.quantity ?? 0n) - parsedTradeAmount;
+      const baseTradeSuccessPayload = {
+        outcomeLabel: market.outcomeLabels[selectedOutcome] ?? `Outcome ${selectedOutcome + 1}`,
+        shareCount: parsedTradeAmount,
+        netAmount: quote?.netAmount ?? 0n,
+        feeAmount: quote?.fee ?? 0n,
+        resultingPositionShares,
+      };
+
       if (tradeType === "buy") {
         const inventory = await fetchCollateralCoins(account);
         const required = quote?.netAmount ?? 0n;
@@ -181,7 +194,13 @@ export default function MarketDetailSidebar({
               senderAddress: account,
             });
 
-        await executeSponsoredTx(tx);
+        const result = await executeSponsoredTx(tx);
+        setTradeAmount("");
+        await onTradeSuccess({
+          action: "buy",
+          digest: result.digest,
+          ...baseTradeSuccessPayload,
+        });
       } else if (selectedPosition) {
         const minProceeds = applySlippage(quote?.netAmount ?? 0n, DEFAULT_SLIPPAGE_BPS, "down");
         const deadlineMs = BigInt(Date.now() + DEADLINE_WINDOW_MS);
@@ -193,11 +212,14 @@ export default function MarketDetailSidebar({
           deadlineMs,
         });
 
-        await executeSponsoredTx(tx);
+        const result = await executeSponsoredTx(tx);
+        setTradeAmount("");
+        await onTradeSuccess({
+          action: "sell",
+          digest: result.digest,
+          ...baseTradeSuccessPayload,
+        });
       }
-
-      setTradeAmount("");
-      await onTradeSuccess();
     } catch (error) {
       setTradeError(error instanceof Error ? error.message : "Trade failed.");
     } finally {
@@ -217,12 +239,11 @@ export default function MarketDetailSidebar({
     <div className="flex flex-col gap-6">
       {market.state === MarketState.DISPUTED && market.sdvm && !voteExpanded ? (
         <div className="text-sm leading-relaxed text-text-muted">
-          The dispute objects are live on-chain, but the dedicated stake, vote, and reward UI is not shipped yet. Track it
-          from{" "}
+          This dispute round is live on-chain. Stake, commit, reveal, and reward actions now run from{" "}
           <Link to="/portfolio" className="cursor-pointer text-mint underline">
             Portfolio
           </Link>{" "}
-          when that surface lands.
+          over the RPC write path.
         </div>
       ) : market.state === MarketState.RESOLVED && market.resolution ? (
         <div className="border border-mint-dim bg-bg-panel p-4">

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { useCurrentAccount } from "@mysten/dapp-kit-react";
 import TerminalScreen from "../components/terminal/TerminalScreen";
+import TransactionSuccessOverlay from "../components/ui/TransactionSuccessOverlay";
 import { MarketState, TrustTier, CreatorInfluenceLevel, ResolutionClass } from "../lib/market-types";
 import { outcomeProbabilityBps } from "../lib/amm";
 import { useMarketData, useAllMarkets } from "../hooks/useMarketData";
@@ -13,10 +14,16 @@ import Footer from "../components/ui/Footer";
 import { hashUtf8ToBytes32 } from "../lib/crypto";
 import { fetchCollateralCoins } from "../lib/collateral";
 import {
+  buildCreateAndShareSdvmVoteRoundTransaction,
   buildCommunityProposeResolutionTransaction,
-  buildDisputeTransaction,
+  buildFileAndShareDisputeTransaction,
+  buildFinalizeResolutionTransaction,
   buildProposeResolutionTransaction,
+  buildReturnCreatorBondTransaction,
 } from "../lib/market-transactions";
+import { extractEventField } from "../lib/market-lifecycle";
+import { EVENT_DISPUTE_FILED } from "../lib/market-constants";
+import { buildTradeSuccessOverlayModel, type TradeSuccessPayload } from "../lib/trade-success";
 import {
   getCreationBondMinRawFromConfig,
   getDisputeBondAmountRawFromConfig,
@@ -103,6 +110,11 @@ export default function MarketDetailPage() {
   const [disputeReason, setDisputeReason] = useState("");
   const [disputePending, setDisputePending] = useState(false);
   const [disputeError, setDisputeError] = useState<string | null>(null);
+  const [finalizePending, setFinalizePending] = useState(false);
+  const [finalizeError, setFinalizeError] = useState<string | null>(null);
+  const [creatorBondPending, setCreatorBondPending] = useState(false);
+  const [creatorBondError, setCreatorBondError] = useState<string | null>(null);
+  const [tradeSuccess, setTradeSuccess] = useState<TradeSuccessPayload | null>(null);
 
   if (isMarketLoading) {
     return (
@@ -164,7 +176,12 @@ export default function MarketDetailPage() {
   const creatorPriorityExpired = market.creatorPriorityDeadlineMs <= Date.now();
   const canCommunityPropose =
     market.state === MarketState.CLOSED && supportsCommunityProposal && !isCreator && creatorPriorityExpired;
+  const canFinalizeResolution =
+    market.state === MarketState.RESOLUTION_PENDING &&
+    Boolean(market.resolution) &&
+    Date.now() >= market.resolution.disputeWindowEndMs;
   const marketStateLabel = getMarketStateLabel(market.state);
+  const tradeSuccessOverlay = tradeSuccess ? buildTradeSuccessOverlayModel(tradeSuccess) : null;
 
   const handleSubmitProposal = async () => {
     if (!account?.address) {
@@ -233,7 +250,14 @@ export default function MarketDetailPage() {
     setDisputeError(null);
 
     try {
+      if (market.resolution && proposedOutcome === market.resolution.resolvedOutcome) {
+        throw new Error("Dispute must propose a different outcome than the active resolution.");
+      }
+
       const inventory = await fetchCollateralCoins(account.address);
+      if (inventory.totalBalance < disputeBondAmountRaw) {
+        throw new Error("Not enough collateral for the required dispute bond.");
+      }
       const reasonHash = await hashUtf8ToBytes32(
         JSON.stringify({
           marketId: market.id,
@@ -242,14 +266,34 @@ export default function MarketDetailPage() {
         }),
       );
 
-      const tx = buildDisputeTransaction({
+      const tx = buildFileAndShareDisputeTransaction({
         marketId: market.id,
         proposedOutcome,
         reasonHash,
         bondCoinIds: inventory.coinObjectIds,
       });
 
-      await executeSponsoredTx(tx);
+      const disputeResult = await executeSponsoredTx(tx);
+      const disputeId = extractEventField(disputeResult.events, EVENT_DISPUTE_FILED, "dispute_id");
+      if (!disputeId) {
+        throw new Error("Dispute was filed, but the relay response did not include the dispute ID.");
+      }
+
+      try {
+        const roundTx = buildCreateAndShareSdvmVoteRoundTransaction({ disputeId });
+        await executeSponsoredTx(roundTx);
+      } catch (roundError) {
+        await refetchMarket();
+        setDisputeExpanded(false);
+        setDisputeReason("");
+        setDisputeError(
+          roundError instanceof Error
+            ? `Dispute filed. SDVM round creation will fall back to the phase bot if needed: ${roundError.message}`
+            : "Dispute filed. SDVM round creation will fall back to the phase bot if needed.",
+        );
+        return;
+      }
+
       setDisputeExpanded(false);
       setDisputeReason("");
       await refetchMarket();
@@ -257,6 +301,36 @@ export default function MarketDetailPage() {
       setDisputeError(error instanceof Error ? error.message : "Failed to file dispute.");
     } finally {
       setDisputePending(false);
+    }
+  };
+
+  const handleFinalizeResolution = async () => {
+    setFinalizePending(true);
+    setFinalizeError(null);
+
+    try {
+      const tx = buildFinalizeResolutionTransaction({ marketId: market.id });
+      await executeSponsoredTx(tx);
+      await refetchMarket();
+    } catch (error) {
+      setFinalizeError(error instanceof Error ? error.message : "Failed to finalize resolution.");
+    } finally {
+      setFinalizePending(false);
+    }
+  };
+
+  const handleReturnCreatorBond = async () => {
+    setCreatorBondPending(true);
+    setCreatorBondError(null);
+
+    try {
+      const tx = buildReturnCreatorBondTransaction({ marketId: market.id });
+      await executeSponsoredTx(tx);
+      await refetchMarket();
+    } catch (error) {
+      setCreatorBondError(error instanceof Error ? error.message : "Failed to return creator bond.");
+    } finally {
+      setCreatorBondPending(false);
     }
   };
 
@@ -367,6 +441,10 @@ export default function MarketDetailPage() {
                 disputeReason={disputeReason}
                 setDisputeReason={setDisputeReason}
                 onSubmitDispute={handleSubmitDispute}
+                canFinalizeResolution={canFinalizeResolution}
+                onFinalizeResolution={handleFinalizeResolution}
+                finalizePending={finalizePending}
+                finalizeError={finalizeError}
                 isSubmitting={disputePending}
                 error={disputeError}
               />
@@ -383,7 +461,15 @@ export default function MarketDetailPage() {
               </div>
             )}
 
-            {market.state === MarketState.RESOLVED && market.resolution && <MarketDetailResolved market={market} />}
+            {market.state === MarketState.RESOLVED && market.resolution && (
+              <MarketDetailResolved
+                market={market}
+                isCreator={isCreator}
+                onReturnCreatorBond={handleReturnCreatorBond}
+                creatorBondPending={creatorBondPending}
+                creatorBondError={creatorBondError}
+              />
+            )}
 
             <MarketDetailInfo market={market} />
           </div>
@@ -401,12 +487,28 @@ export default function MarketDetailPage() {
               account={account?.address ?? null}
               voteExpanded={false}
               positions={positions}
-              onTradeSuccess={async () => {
-                await Promise.all([refetchMarket(), refetchPositions()]);
+              onTradeSuccess={(payload) => {
+                setTradeSuccess(payload);
+                void Promise.all([refetchMarket(), refetchPositions()]).catch((error) => {
+                  console.error("Failed to refresh market after successful trade:", error);
+                });
               }}
             />
           </div>
         </div>
+
+        {tradeSuccessOverlay && (
+          <TransactionSuccessOverlay
+            headline={tradeSuccessOverlay.headline}
+            message={tradeSuccessOverlay.message}
+            summaryRows={tradeSuccessOverlay.summaryRows}
+            digest={tradeSuccessOverlay.digest}
+            explorerUrl={tradeSuccessOverlay.explorerUrl}
+            accent={tradeSuccessOverlay.accent}
+            primaryActionLabel={tradeSuccessOverlay.primaryActionLabel}
+            onPrimaryAction={() => setTradeSuccess(null)}
+          />
+        )}
 
         <Footer />
       </div>

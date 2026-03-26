@@ -20,8 +20,10 @@ import {
   RelayApiError,
 } from "../lib/gas-relay-client";
 
-interface SponsoredResult {
+export interface SponsoredResult {
   digest: string;
+  effects?: unknown;
+  events?: unknown;
 }
 
 function extractErrorDetail(error: unknown): string {
@@ -176,7 +178,11 @@ export function useSponsoredTransaction() {
           try {
             // Step 3: Send the exact wallet-signed bytes back to the relay for co-signing and execution
             const result = await executeRelay(signed.bytes, signed.signature, sponsored.gasCoinId);
-            return { digest: result.digest };
+            return {
+              digest: result.digest,
+              effects: result.effects,
+              events: result.events,
+            };
           } catch (err) {
             if (shouldTripRelayHealth(err)) {
               relayHealthy.current = false;

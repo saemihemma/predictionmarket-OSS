@@ -16,13 +16,13 @@ import { useCollateralBalance } from "../hooks/useCollateralBalance";
 import { useSponsoredTransaction } from "../hooks/useSponsoredTransaction";
 import { protocolReadTransport } from "../lib/client";
 import { formatCollateralAmount } from "../lib/collateral";
+import { buildTransactionExplorerUrl } from "../lib/explorer";
 import { buildFaucetClaimTransaction } from "../lib/faucet-transactions";
 import { formatAddress } from "../lib/formatting";
 import { checkFaucetEligibility, checkRelayHealth, RelayApiError } from "../lib/gas-relay-client";
 import { COLLATERAL_COIN_TYPE, COLLATERAL_SYMBOL, PM_FAUCET_ID, PM_GAS_RELAY_URL } from "../lib/market-constants";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-const EXPLORER_BASE_URL = "https://testnet.suivision.xyz/txblock";
 const EVE_VAULT_RELEASES_URL = "https://github.com/evefrontier/evevault/releases";
 const EVE_VAULT_DOWNLOAD_URL = "https://github.com/evefrontier/evevault/releases/download/v0.0.6/eve-vault-chrome.zip";
 const AIRDROP_MOBILE_DESKTOP_ONLY = true;
@@ -190,10 +190,6 @@ function truncateMiddle(value: string, start = 12, end = 8): string {
   return `${value.slice(0, start)}...${value.slice(-end)}`;
 }
 
-function buildExplorerUrl(digest: string): string {
-  return `${EXPLORER_BASE_URL}/${digest}`;
-}
-
 function toFriendlyClaimError(error: unknown): string {
   if (error instanceof RelayApiError) {
     if (error.code === "frontier_character_required") {
@@ -335,7 +331,7 @@ export default function AirdropPage() {
   const sameClaimAmountEachDay = faucet ? faucet.starterAmount === faucet.dailyAmount : false;
   const canAffordClaim = faucet ? faucet.poolBalance >= claimAmount : false;
   const nextClaimCountdown = formatCountdown(nextResetMs - nowMs);
-  const explorerUrl = successDigest ? buildExplorerUrl(successDigest) : null;
+  const explorerUrl = successDigest ? buildTransactionExplorerUrl(successDigest) : null;
   const eligibilityLoading =
     Boolean(account?.address) &&
     relayConfigured &&
