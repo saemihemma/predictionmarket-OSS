@@ -113,9 +113,12 @@ export default function ResolutionStep({
           type="text"
           value={resolutionSourceUri}
           onChange={(e) => onSourceUriChange(e.target.value)}
-          placeholder="https://example.com/source"
+          placeholder="example.com/source"
           className="w-full p-4 text-base bg-bg-terminal text-text border border-border-panel outline-none"
         />
+        <div className="mt-2 text-xs text-text-dim">
+          Enter a public source domain or link. `http://`, `https://`, and `www.` are optional.
+        </div>
       </div>
 
       <div>

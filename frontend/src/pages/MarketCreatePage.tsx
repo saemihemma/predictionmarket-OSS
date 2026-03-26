@@ -33,6 +33,7 @@ import {
   getPolicyEvidenceFormatLabel,
   getPolicySourceTypeLabel,
 } from "../lib/protocol-policy";
+import { isValidPublicSourceInput } from "../lib/source-input";
 import { useProtocolRuntimeConfig } from "../hooks/useProtocolRuntimeConfig";
 import { useSponsoredTransaction } from "../hooks/useSponsoredTransaction";
 import TitleStep from "./create/TitleStep";
@@ -97,15 +98,6 @@ function createInitialFormData(): FormData {
 
 function mapTrustTier(profile: PublicProfile): TrustTier {
   return profile === "sourceBackedCommunity" ? TrustTier.CREATOR_RESOLVED : TrustTier.EXPERIMENTAL;
-}
-
-function isValidHttpUrl(value: string): boolean {
-  try {
-    const parsed = new URL(value);
-    return parsed.protocol === "http:" || parsed.protocol === "https:";
-  } catch {
-    return false;
-  }
 }
 
 function sanitizeWizardError(error: unknown): string {
@@ -309,8 +301,8 @@ export default function MarketCreatePage() {
     if (formData.trustTier === "sourceBackedCommunity" && !trimmedSourceUri) {
       resolutionMessages.push("Source-backed community markets require a primary source URL.");
     }
-    if (trimmedSourceUri && !isValidHttpUrl(trimmedSourceUri)) {
-      resolutionMessages.push("Enter a valid source URL starting with http:// or https://.");
+    if (trimmedSourceUri && !isValidPublicSourceInput(trimmedSourceUri)) {
+      resolutionMessages.push("Enter a valid public source like example.com or example.com/source.");
     }
 
     if (configLoading || !minimumCreationBondRaw) {
