@@ -125,6 +125,25 @@ jobs:
       - name: Print Sui version
         run: sui --version
 
+      - name: Normalize Move.lock paths for Linux
+        working-directory: contracts
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          lockfile = Path("Move.lock")
+          text = lockfile.read_text()
+          text = text.replace(
+              r"crates\sui-framework\packages\move-stdlib",
+              "crates/sui-framework/packages/move-stdlib",
+          )
+          text = text.replace(
+              r"crates\sui-framework\packages\sui-framework",
+              "crates/sui-framework/packages/sui-framework",
+          )
+          lockfile.write_text(text)
+          PY
+
       - name: Build Move package
         working-directory: contracts
         run: sui move build
