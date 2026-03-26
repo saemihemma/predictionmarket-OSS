@@ -1,125 +1,55 @@
-graph TD
-    subgraph "On-Chain: Sui Move (prediction_market package)"
-        subgraph "Layer 1: External Collateral"
-            SUFFER["<b>External SFR coin</b><br/>Standalone collateral family"]
-        end
-
-        subgraph "Layer 2: Market Core"
-            PMMARKET["<b>pm_market.move</b><br/>Market creation<br/>Pool management<br/>State transitions<br/>Community proposal fields"]
-            PMTRADING["<b>pm_trading.move</b><br/>Buy<br/>Sell<br/>Claim<br/>Refund"]
-            PMMATH["<b>pm_math.move</b><br/>CPMM pricing<br/>Product formula<br/>Categorical N-outcomes"]
-            PMPOSITION["<b>pm_position.move</b><br/>User positions<br/>Cost basis tracking"]
-        end
-
-        subgraph "Layer 3: Resolution & Dispute"
-            PMRESOLUTION["<b>pm_resolution.move</b><br/>3-tier resolution<br/>Creator priority window<br/>Community proposal<br/>Deterministic<br/>Declared source<br/>Creator proposed"]
-            PMDISPUTE["<b>pm_dispute.move</b><br/>Dispute filing<br/>Bond escrow<br/>Bond distribution 75/25<br/>SDVM setup"]
-            PMSOURCE["<b>pm_source.move</b><br/>Data source registry<br/>Verifier caps"]
-        end
-
-        subgraph "Layer 4: Voting & Staking"
-            PMSDVM["<b>pm_sdvm.move</b><br/>Commit-reveal voting<br/>Commit phase<br/>Reveal phase<br/>Tally<br/>Slash & reward<br/>Abstain support"]
-            PMSTAKING["<b>pm_staking.move</b><br/>Stake pool<br/>Cooldown tracking<br/>Dispute-aware unstaking<br/>Slash calculation<br/>Reward distribution"]
-        end
-
-        subgraph "Layer 5: Configuration & Admin"
-            PMREGISTRY["<b>pm_registry.move</b><br/>Global config<br/>Fee rates<br/>Bond amounts<br/>Timers"]
-            PMPOLICY["<b>pm_policy.move</b><br/>Market policies<br/>Trust tiers<br/>Resolution rules"]
-            PMTREASURY["<b>pm_treasury.move</b><br/>Fee collection<br/>Bond forfeiture<br/>Accumulation"]
-            PMFAUCET["<b>pm_faucet.move</b><br/>Starter + daily faucet<br/>Claim tracking<br/>Pause and top-up"]
-            PMADMIN["<b>pm_admin.move</b><br/>Admin caps<br/>God levers<br/>Parameter updates"]
-            PMDEPLOY["<b>pm_deploy.move</b><br/>Bootstrap helpers<br/>Family initialization"]
-            PMRULES["<b>pm_rules.move</b><br/>Constants<br/>Enums<br/>CREATOR_PRIORITY_WINDOW_MS<br/>Validators"]
-            PMEVENTS["<b>pm_events.move</b><br/>Event types<br/>Emissions"]
-            PMVIEW["<b>pm_view.move</b><br/>View functions<br/>Query helpers"]
-        end
-
-        subgraph "Supporting Modules"
-            SWAPPOOL["<b>swap_pool.move</b><br/>Secondary liquidity"]
-        end
+flowchart LR
+    subgraph Experience["Experience Layer"]
+        Users["Players, reviewers, operators"]
+        Wallets["Sui wallets\nEVE Vault, Slush, others"]
+        Frontend["Frontend\nReact + Vite\nmanifest-driven runtime"]
     end
 
-    subgraph "Off-Chain Services"
-        GASRELAY["<b>Gas Relay</b><br/>Node.js Express<br/>Sponsorship<br/>Whitelist<br/>Rate limiting"]
-        PHASEBOT["<b>Phase Bot</b><br/>Node.js service<br/>Phase advancement<br/>Deadline monitoring<br/>Automation"]
+    subgraph Services["Trusted Off-Chain Services"]
+        Manifest["Deployment contract\n`deployments/testnet.json`\n+ synced frontend manifest"]
+        Relay["Gas Relay\nallowlisted sponsored transactions"]
+        Bot["Phase Bot\nSDVM phase advancement"]
     end
 
-    subgraph "Frontend"
-        REACT["<b>React + TypeScript</b><br/>Market list<br/>Create market wizard<br/>Trading dashboard<br/>Community proposal UI<br/>Portfolio + airdrop<br/>Live manifest-driven data"]
+    subgraph Protocol["On-Chain Protocol on Sui Testnet"]
+        Config["Registry, policy, rules\nfees, bonds, timers"]
+        Markets["Market core\npositions, CPMM trading"]
+        Resolution["Resolution, disputes, SDVM"]
+        Faucet["SUFFER faucet"]
+        Treasury["Treasury and fee capture"]
+        Collateral["External SUFFER collateral"]
     end
 
-    %% Layer 1 connections
-    PMMARKET --> SUFFER
-    PMTRADING --> SUFFER
-    PMPOSITION --> PMTRADING
-    PMMATH --> PMTRADING
-    PMTRADING --> PMMARKET
+    Admin["Testnet admin and emergency levers"]:::risk
 
-    %% Layer 3 connections
-    PMRESOLUTION --> PMMARKET
-    PMDISPUTE --> PMMARKET
-    PMDISPUTE --> PMRESOLUTION
-    PMSOURCE --> PMRESOLUTION
+    Users --> Frontend
+    Wallets <--> Frontend
+    Manifest --> Frontend
+    Manifest --> Bot
 
-    %% Layer 4 connections
-    PMSDVM --> PMDISPUTE
-    PMSTAKING --> PMSDVM
-    PMSTAKING --> SUFFER
+    Frontend -->|reads protocol state| Config
+    Frontend -->|reads markets and positions| Markets
+    Frontend -->|reads disputes and SDVM state| Resolution
+    Frontend -->|reads faucet state| Faucet
 
-    %% Layer 5 connections
-    PMREGISTRY --> PMMARKET
-    PMREGISTRY --> PMDISPUTE
-    PMREGISTRY --> PMSDVM
-    PMREGISTRY --> PMSTAKING
-    PMPOLICY --> PMMARKET
-    PMPOLICY --> PMRESOLUTION
-    PMTREASURY --> PMTRADING
-    PMTREASURY --> PMDISPUTE
-    PMFAUCET --> SUFFER
-    PMADMIN --> PMSDVM
-    PMDEPLOY --> PMREGISTRY
-    PMDEPLOY --> PMFAUCET
-    PMRULES --> PMMARKET
-    PMRULES --> PMTRADING
-    PMRULES --> PMSDVM
-    PMRULES --> PMSTAKING
-    PMEVENTS --> PMMARKET
-    PMEVENTS --> PMTRADING
-    PMEVENTS --> PMSDVM
-    PMVIEW --> PMMARKET
+    Frontend -->|sponsored write path| Relay
+    Relay -->|create, trade, claim,\ndispute, stake, vote| Markets
+    Relay --> Resolution
+    Relay --> Faucet
 
-    %% Supporting modules
-    SWAPPOOL --> PMTRADING
+    Bot -->|advance expired phases| Resolution
 
-    %% Off-chain to on-chain
-    GASRELAY --> PMTRADING
-    GASRELAY --> PMDISPUTE
-    GASRELAY --> PMSDVM
-    GASRELAY --> PMSTAKING
-    GASRELAY --> PMFAUCET
-    PHASEBOT --> PMSDVM
+    Config --> Markets
+    Config --> Resolution
+    Config --> Faucet
 
-    %% Frontend to off-chain & on-chain
-    REACT --> GASRELAY
-    REACT --> PMMARKET
-    REACT --> PMTRADING
-    REACT --> PMSDVM
-    REACT --> PMSTAKING
-    REACT --> PMFAUCET
+    Markets --> Treasury
+    Resolution --> Treasury
+    Faucet --> Collateral
+    Markets --> Collateral
 
-    %% Styling
-    classDef layer1 fill:#1a3a2a,stroke:#caf5de,stroke-width:2px
-    classDef layer2 fill:#0f2818,stroke:#6e9f8d,stroke-width:2px
-    classDef layer3 fill:#0f2818,stroke:#6e9f8d,stroke-width:2px
-    classDef layer4 fill:#0f2818,stroke:#6e9f8d,stroke-width:2px
-    classDef layer5 fill:#06110c,stroke:#5a7a6a,stroke-width:1px
-    classDef offchain fill:#1a2a24,stroke:#dd7a1f,stroke-width:2px
-    classDef frontend fill:#1a2a24,stroke:#f2c94c,stroke-width:2px
+    Admin -. governs testnet-only controls .-> Config
+    Admin -. emergency overrides .-> Resolution
+    Admin -. pause and top-up .-> Faucet
 
-    class SUFFER layer1
-    class PMMARKET,PMTRADING,PMMATH,PMPOSITION layer2
-    class PMRESOLUTION,PMDISPUTE,PMSOURCE layer3
-    class PMSDVM,PMSTAKING layer4
-    class PMREGISTRY,PMPOLICY,PMTREASURY,PMFAUCET,PMADMIN,PMDEPLOY,PMRULES,PMEVENTS,PMVIEW,SWAPPOOL layer5
-    class GASRELAY,PHASEBOT offchain
-    class REACT frontend
+    classDef risk fill:#2a1208,stroke:#dd7a1f,stroke-width:2px,color:#f6d7b8;
