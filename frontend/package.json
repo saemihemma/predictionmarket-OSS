@@ -8,7 +8,10 @@
     "dev": "vite",
     "prebuild": "node ../scripts/sync-protocol-manifest.mjs",
     "build": "node ../scripts/sync-protocol-manifest.mjs --check && tsc -b && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:a11y": "playwright test -c playwright.config.ts",
+    "test:a11y:headed": "playwright test -c playwright.config.ts --headed",
+    "test:a11y:install": "playwright install chromium"
   },
   "dependencies": {
     "@mysten/dapp-kit-react": "^2.0.0",
@@ -24,6 +27,8 @@
     "tailwind-merge": "^3.5.0"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.11.0",
+    "@playwright/test": "^1.55.0",
     "@tailwindcss/vite": "^4.2.1",
     "@types/node": "^25.3.5",
     "@types/react": "^18.2.0",

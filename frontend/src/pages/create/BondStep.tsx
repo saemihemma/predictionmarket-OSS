@@ -1,3 +1,4 @@
+import { useId } from "react";
 import { COLLATERAL_SYMBOL } from "../../lib/market-constants";
 
 interface BondStepProps {
@@ -15,12 +16,17 @@ export default function BondStep({
   resolutionBond,
   onCreationBondChange,
 }: BondStepProps) {
+  const creationBondId = useId();
+
   return (
     <>
       <div className="grid gap-6 md:grid-cols-2">
         <div>
-          <label className="mb-2 block text-sm font-medium text-mint">Creation Bond ({COLLATERAL_SYMBOL})</label>
+          <label htmlFor={creationBondId} className="mb-2 block text-sm font-medium text-mint">
+            Creation Bond ({COLLATERAL_SYMBOL})
+          </label>
           <input
+            id={creationBondId}
             type="text"
             inputMode="decimal"
             value={creationBond}

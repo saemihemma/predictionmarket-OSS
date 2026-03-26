@@ -1,7 +1,7 @@
 #[test_only]
 module prediction_market::sdvm_functional_tests;
 
-use std::{bcs, hash, string, unit_test::destroy};
+use std::{bcs, hash, unit_test::destroy};
 use sui::{
     clock::{Self as clock},
     test_scenario::{Self as ts},
@@ -330,7 +330,7 @@ fun test_sdvm_zero_participation_invalidates_market_instead_of_defaulting_to_out
     ts::end(scenario);
 }
 
-#[test, expected_failure(abort_code = 5)]
+#[test, expected_failure(abort_code = pm_staking::EPendingDisputes, location = prediction_market::pm_staking)]
 fun test_post_unstake_dispute_blocks_complete_unstake() {
     let mut scenario = ts::begin(@0x1);
     let ctx = ts::ctx(&mut scenario);
@@ -348,23 +348,24 @@ fun test_post_unstake_dispute_blocks_complete_unstake() {
         ctx,
     );
 
+    let position_id = object::id(&position);
     pm_staking::initiate_unstake(&mut position, &test_clock, ctx);
-    pm_staking::register_dispute(&mut position, object::id(&position));
+    pm_staking::register_dispute(&mut position, position_id);
     clock::increment_for_testing(&mut test_clock, 48 * 60 * 60 * 1000 + 1);
 
-    let _coin = pm_staking::complete_unstake(
+    destroy(pm_staking::complete_unstake(
         &mut stake_pool,
         position,
         &test_clock,
         ctx,
-    );
+    ));
 
     ts::return_shared(stake_pool);
     clock::destroy_for_testing(test_clock);
     ts::end(scenario);
 }
 
-#[test, expected_failure(abort_code = 5)]
+#[test, expected_failure(abort_code = pm_staking::EPendingDisputes, location = prediction_market::pm_staking)]
 fun test_post_unstake_dispute_blocks_emergency_unstake() {
     let mut scenario = ts::begin(@0x1);
     let ctx = ts::ctx(&mut scenario);
@@ -382,15 +383,16 @@ fun test_post_unstake_dispute_blocks_emergency_unstake() {
         ctx,
     );
 
+    let position_id = object::id(&position);
     pm_staking::initiate_unstake(&mut position, &test_clock, ctx);
-    pm_staking::register_dispute(&mut position, object::id(&position));
+    pm_staking::register_dispute(&mut position, position_id);
 
-    let _coin = pm_staking::emergency_unstake(
+    destroy(pm_staking::emergency_unstake(
         &mut stake_pool,
         position,
         &test_clock,
         ctx,
-    );
+    ));
 
     ts::return_shared(stake_pool);
     clock::destroy_for_testing(test_clock);

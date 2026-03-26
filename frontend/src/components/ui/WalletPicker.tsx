@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useId } from "react";
 import type { UiWallet } from "@mysten/dapp-kit-core";
 
 interface WalletPickerProps {
@@ -22,6 +22,9 @@ export default function WalletPicker({
   walletHint = "Use this wallet for the Orchestrator on Sui testnet.",
   emptyStateText = "No Sui wallet was detected in this browser yet.",
 }: WalletPickerProps) {
+  const titleId = useId();
+  const descriptionId = useId();
+
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape" && !connectingWalletName) {
@@ -36,30 +39,41 @@ export default function WalletPicker({
   return (
     <div
       className="fixed inset-0 z-[1200] flex items-center justify-center bg-[rgba(2,5,3,0.82)] px-4 py-6"
+      role="presentation"
       onClick={() => {
         if (!connectingWalletName) onClose();
       }}
     >
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        aria-describedby={descriptionId}
+        aria-busy={Boolean(connectingWalletName)}
         className="w-full max-w-lg border border-border-panel bg-bg-panel p-5 shadow-[0_0_28px_rgba(0,0,0,0.45)]"
         onClick={(event) => event.stopPropagation()}
       >
         <div className="flex items-start justify-between gap-4">
           <div>
             <div className="text-[0.72rem] font-semibold tracking-[0.14em] text-text-muted">WALLET ACCESS</div>
-            <h3 className="mt-3 m-0 text-[1.1rem] font-bold tracking-[0.1em] text-mint md:text-[1.25rem]">{title}</h3>
+            <h3 id={titleId} className="mt-3 m-0 text-[1.1rem] font-bold tracking-[0.1em] text-mint md:text-[1.25rem]">
+              {title}
+            </h3>
           </div>
           <button
             type="button"
             onClick={onClose}
             disabled={Boolean(connectingWalletName)}
+            aria-label="Close wallet picker"
             className="touch-target inline-flex min-h-10 min-w-10 items-center justify-center border border-border-panel px-3 text-xs font-semibold tracking-[0.12em] text-text-muted disabled:cursor-not-allowed disabled:opacity-40"
           >
             CLOSE
           </button>
         </div>
 
-        <p className="mt-4 mb-0 text-[0.84rem] leading-6 tracking-[0.04em] text-text-muted">{description}</p>
+        <p id={descriptionId} className="mt-4 mb-0 text-[0.84rem] leading-6 tracking-[0.04em] text-text-muted">
+          {description}
+        </p>
 
         <div className="mt-5 grid gap-3">
           {wallets.length > 0 ? (

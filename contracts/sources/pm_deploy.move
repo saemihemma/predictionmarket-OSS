@@ -142,6 +142,8 @@ fun share_default_policies<Collateral>(
 
 /// Bootstrap the full shared-object family for a collateral type.
 /// Defaults to single-operator testnet governance (sender owns all caps and acts as resolver/emergency member).
+/// Testnet bootstrap intentionally returns admin and safety caps to the deployer.
+#[allow(lint(self_transfer))]
 public fun bootstrap_default_family<Collateral>(
     trading_fee_bps: u64,
     settlement_fee_bps: u64,

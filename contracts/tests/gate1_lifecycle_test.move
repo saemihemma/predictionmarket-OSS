@@ -5,6 +5,7 @@ use std::unit_test::destroy;
 use sui::{clock::{Self as clock}, test_scenario::{Self as ts}};
 use prediction_market::{
     pm_market,
+    pm_policy,
     pm_registry,
     pm_resolution,
     pm_rules,
@@ -108,11 +109,11 @@ fun test_deterministic_resolution_uses_generic_verifier_cap() {
     ts::end(scenario);
 }
 
-#[test, expected_failure(abort_code = 6)]
+#[test, expected_failure(abort_code = pm_policy::EInvalidSourceClass, location = prediction_market::pm_policy)]
 fun test_market_creation_rejects_mismatched_source_class() {
     let mut scenario = ts::begin(@0x1);
     let ctx = ts::ctx(&mut scenario);
-    let mut test_clock = clock::create_for_testing(ctx);
+    let test_clock = clock::create_for_testing(ctx);
 
     let (mut registry, config, admin) = support::create_core_bundle<TEST_COLLATERAL>(ctx);
     let (policy, resolver_policy) = support::create_creator_policy(&admin, ctx);
@@ -129,7 +130,7 @@ fun test_market_creation_rejects_mismatched_source_class() {
     );
     let creator_influence = pm_market::new_creator_influence(0, false, std::string::utf8(b"none"));
 
-    let _market = pm_market::create_market(
+    destroy(pm_market::create_market(
         &mut registry,
         &config,
         &policy,
@@ -146,17 +147,23 @@ fun test_market_creation_rejects_mismatched_source_class() {
         creation_bond,
         &test_clock,
         ctx,
-    );
+    ));
+
+    destroy(policy);
+    destroy(resolver_policy);
+    destroy(admin);
+    destroy(config);
+    destroy(registry);
 
     clock::destroy_for_testing(test_clock);
     ts::end(scenario);
 }
 
-#[test, expected_failure(abort_code = 7)]
+#[test, expected_failure(abort_code = pm_policy::EInvalidEvidenceFormat, location = prediction_market::pm_policy)]
 fun test_market_creation_rejects_mismatched_evidence_format() {
     let mut scenario = ts::begin(@0x1);
     let ctx = ts::ctx(&mut scenario);
-    let mut test_clock = clock::create_for_testing(ctx);
+    let test_clock = clock::create_for_testing(ctx);
 
     let (mut registry, config, admin) = support::create_core_bundle<TEST_COLLATERAL>(ctx);
     let (policy, resolver_policy) = support::create_creator_policy(&admin, ctx);
@@ -173,7 +180,7 @@ fun test_market_creation_rejects_mismatched_evidence_format() {
     );
     let creator_influence = pm_market::new_creator_influence(0, false, std::string::utf8(b"none"));
 
-    let _market = pm_market::create_market(
+    destroy(pm_market::create_market(
         &mut registry,
         &config,
         &policy,
@@ -190,7 +197,13 @@ fun test_market_creation_rejects_mismatched_evidence_format() {
         creation_bond,
         &test_clock,
         ctx,
-    );
+    ));
+
+    destroy(policy);
+    destroy(resolver_policy);
+    destroy(admin);
+    destroy(config);
+    destroy(registry);
 
     clock::destroy_for_testing(test_clock);
     ts::end(scenario);

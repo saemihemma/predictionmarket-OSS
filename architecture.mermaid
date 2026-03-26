@@ -26,7 +26,9 @@ graph TD
             PMREGISTRY["<b>pm_registry.move</b><br/>Global config<br/>Fee rates<br/>Bond amounts<br/>Timers"]
             PMPOLICY["<b>pm_policy.move</b><br/>Market policies<br/>Trust tiers<br/>Resolution rules"]
             PMTREASURY["<b>pm_treasury.move</b><br/>Fee collection<br/>Bond forfeiture<br/>Accumulation"]
+            PMFAUCET["<b>pm_faucet.move</b><br/>Starter + daily faucet<br/>Claim tracking<br/>Pause and top-up"]
             PMADMIN["<b>pm_admin.move</b><br/>Admin caps<br/>God levers<br/>Parameter updates"]
+            PMDEPLOY["<b>pm_deploy.move</b><br/>Bootstrap helpers<br/>Family initialization"]
             PMRULES["<b>pm_rules.move</b><br/>Constants<br/>Enums<br/>CREATOR_PRIORITY_WINDOW_MS<br/>Validators"]
             PMEVENTS["<b>pm_events.move</b><br/>Event types<br/>Emissions"]
             PMVIEW["<b>pm_view.move</b><br/>View functions<br/>Query helpers"]
@@ -43,7 +45,7 @@ graph TD
     end
 
     subgraph "Frontend"
-        REACT["<b>React + TypeScript</b><br/>Market list<br/>Create market wizard<br/>Trading dashboard<br/>Community proposal UI<br/>Staking/voting UI<br/>Mock market data"]
+        REACT["<b>React + TypeScript</b><br/>Market list<br/>Create market wizard<br/>Trading dashboard<br/>Community proposal UI<br/>Portfolio + airdrop<br/>Live manifest-driven data"]
     end
 
     %% Layer 1 connections
@@ -73,7 +75,10 @@ graph TD
     PMPOLICY --> PMRESOLUTION
     PMTREASURY --> PMTRADING
     PMTREASURY --> PMDISPUTE
+    PMFAUCET --> SUFFER
     PMADMIN --> PMSDVM
+    PMDEPLOY --> PMREGISTRY
+    PMDEPLOY --> PMFAUCET
     PMRULES --> PMMARKET
     PMRULES --> PMTRADING
     PMRULES --> PMSDVM
@@ -91,6 +96,7 @@ graph TD
     GASRELAY --> PMDISPUTE
     GASRELAY --> PMSDVM
     GASRELAY --> PMSTAKING
+    GASRELAY --> PMFAUCET
     PHASEBOT --> PMSDVM
 
     %% Frontend to off-chain & on-chain
@@ -99,6 +105,7 @@ graph TD
     REACT --> PMTRADING
     REACT --> PMSDVM
     REACT --> PMSTAKING
+    REACT --> PMFAUCET
 
     %% Styling
     classDef layer1 fill:#1a3a2a,stroke:#caf5de,stroke-width:2px
@@ -113,6 +120,6 @@ graph TD
     class PMMARKET,PMTRADING,PMMATH,PMPOSITION layer2
     class PMRESOLUTION,PMDISPUTE,PMSOURCE layer3
     class PMSDVM,PMSTAKING layer4
-    class PMREGISTRY,PMPOLICY,PMTREASURY,PMADMIN,PMRULES,PMEVENTS,PMVIEW,SWAPPOOL layer5
+    class PMREGISTRY,PMPOLICY,PMTREASURY,PMFAUCET,PMADMIN,PMDEPLOY,PMRULES,PMEVENTS,PMVIEW,SWAPPOOL layer5
     class GASRELAY,PHASEBOT offchain
     class REACT frontend

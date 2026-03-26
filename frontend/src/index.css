@@ -17,7 +17,7 @@
   --color-neutral-state: #4f6b60;
   --color-text: #caf5de;
   --color-text-muted: #6e9f8d;
-  --color-text-dim: #5a7a6a;
+  --color-text-dim: #678879;
   --color-tribe-a: #f2c94c;
   --color-tribe-a-dim: #8a7428;
   --color-tribe-b: #4db8d4;
@@ -69,7 +69,7 @@
   /* Text */
   --text: #caf5de;
   --text-muted: #6e9f8d;
-  --text-dim: #5a7a6a;
+  --text-dim: #678879;
 
   /* Faction color channels — data layer, distinct from UI chrome.
      Tribe A = yellow/amber (stable ownership channel — NOT mint).

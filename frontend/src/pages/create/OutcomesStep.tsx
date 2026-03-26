@@ -1,3 +1,4 @@
+import { useId } from "react";
 import { MarketType } from "../../lib/market-types";
 
 interface OutcomesStepProps {
@@ -13,6 +14,9 @@ export default function OutcomesStep({
   onMarketTypeChange,
   onOutcomesChange,
 }: OutcomesStepProps) {
+  const marketTypeId = useId();
+  const outcomesLabelId = useId();
+
   const handleMarketTypeChange = (newTypeValue: string) => {
     const newType = Number(newTypeValue) as MarketType;
     if (newType === MarketType.BINARY) {
@@ -25,10 +29,11 @@ export default function OutcomesStep({
   return (
     <>
       <div>
-        <label className="block text-sm font-medium text-mint mb-2">
+        <label htmlFor={marketTypeId} className="block text-sm font-medium text-mint mb-2">
           Market Type
         </label>
         <select
+          id={marketTypeId}
           value={marketType}
           onChange={(e) => handleMarketTypeChange(e.target.value)}
           className="w-full p-4 text-base bg-bg-terminal text-text border border-border-panel outline-none"
@@ -42,9 +47,9 @@ export default function OutcomesStep({
       </div>
 
       <div>
-        <label className="block text-sm font-medium text-mint mb-2">
+        <div id={outcomesLabelId} className="block text-sm font-medium text-mint mb-2">
           Outcomes
-        </label>
+        </div>
 
         {/* Binary market */}
         {marketType === MarketType.BINARY && (
@@ -52,6 +57,8 @@ export default function OutcomesStep({
             {outcomes.map((outcome, i) => (
               <input
                 key={i}
+                aria-labelledby={outcomesLabelId}
+                aria-label={`Outcome ${i + 1}`}
                 type="text"
                 value={outcome}
                 onChange={(e) => {
@@ -73,6 +80,8 @@ export default function OutcomesStep({
               {outcomes.map((outcome, i) => (
                 <input
                   key={i}
+                  aria-labelledby={outcomesLabelId}
+                  aria-label={`Outcome ${i + 1}`}
                   type="text"
                   value={outcome}
                   onChange={(e) => {
@@ -87,6 +96,7 @@ export default function OutcomesStep({
             </div>
             {outcomes.length < 8 && (
               <button
+                type="button"
                 onClick={() => {
                   const newOutcomes = [...outcomes, ""];
                   onOutcomesChange(newOutcomes);

@@ -87,9 +87,10 @@ function getDaysInMonth(year: number, month: number): number {
 interface DateTimePickerProps {
   value: string;
   onChange: (value: string) => void;
+  buttonAriaLabel?: string;
 }
 
-export default function DateTimePicker({ value, onChange }: DateTimePickerProps) {
+export default function DateTimePicker({ value, onChange, buttonAriaLabel }: DateTimePickerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const selectedDate = useMemo(() => parseLocalDateTime(value), [value]);
   const [isOpen, setIsOpen] = useState(false);
@@ -171,6 +172,7 @@ export default function DateTimePicker({ value, onChange }: DateTimePickerProps)
       <button
         type="button"
         onClick={() => setIsOpen((current) => !current)}
+        aria-label={buttonAriaLabel}
         className="touch-target flex min-h-11 w-full items-center justify-between border border-border-panel bg-bg-terminal px-4 py-3 text-left text-base text-text outline-none"
         aria-haspopup="dialog"
         aria-expanded={isOpen}

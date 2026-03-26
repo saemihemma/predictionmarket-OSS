@@ -107,6 +107,8 @@ public fun create_market_type_policy<Collateral>(
     policy
 }
 
+/// Testnet bootstrap intentionally creates and shares a fresh policy in one helper.
+#[allow(lint(share_owned))]
 public fun create_and_share_market_type_policy<Collateral>(
     admin: &prediction_market::pm_registry::PMAdminCap<Collateral>,
     name: String,
@@ -184,6 +186,8 @@ public fun create_resolver_policy<Collateral>(
     policy
 }
 
+/// Testnet bootstrap intentionally creates and shares a fresh resolver policy in one helper.
+#[allow(lint(share_owned))]
 public fun create_and_share_resolver_policy<Collateral>(
     admin: &prediction_market::pm_registry::PMAdminCap<Collateral>,
     dispute_window_deterministic_ms: u64,

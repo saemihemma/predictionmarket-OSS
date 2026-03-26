@@ -136,6 +136,8 @@ public fun create_registry<Collateral>(
 
 /// Convenience: create registry + config + admin cap, share the first two,
 /// transfer admin cap to sender. Callable from a PTB.
+/// Testnet bootstrap intentionally shares registry state and hands the admin cap to the deployer.
+#[allow(lint(self_transfer))]
 public fun create_and_share_registry<Collateral>(
     trading_fee_bps: u64,
     settlement_fee_bps: u64,

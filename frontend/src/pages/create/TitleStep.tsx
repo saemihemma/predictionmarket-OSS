@@ -1,15 +1,20 @@
+import { useId } from "react";
+
 interface TitleStepProps {
   title: string;
   onChange: (value: string) => void;
 }
 
 export default function TitleStep({ title, onChange }: TitleStepProps) {
+  const inputId = useId();
+
   return (
     <div>
-      <label className="block text-sm font-medium text-mint mb-2">
+      <label htmlFor={inputId} className="block text-sm font-medium text-mint mb-2">
         Market Title
       </label>
       <input
+        id={inputId}
         type="text"
         value={title}
         onChange={(e) => onChange(e.target.value)}

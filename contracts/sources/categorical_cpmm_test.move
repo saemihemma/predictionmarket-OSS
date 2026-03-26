@@ -1,25 +1,20 @@
-/// Categorical (N-outcome) Constant-Product Market Maker Tests
-/// Tests the N-outcome CPMM formula implementation for correctness,
-/// backward compatibility with binary, and edge cases.
+/// Categorical (N-outcome) constant-product market maker tests.
+/// These cover the active symmetric reserve-adjustment implementation in
+/// `pm_math`, plus binary compatibility and basic invariant expectations.
 #[test_only]
 module prediction_market::categorical_cpmm_test;
 
 use prediction_market::pm_math;
 
-// ═══════════════════════════════════════════════════════════════
-// Binary (N=2) Backward-Compatibility Tests
-// ═══════════════════════════════════════════════════════════════
+// Binary compatibility
 
 #[test]
 fun test_categorical_buy_matches_binary_equal_reserves() {
-    // Binary market with equal reserves
     let reserves = vector[1_000_000_000u64, 1_000_000_000u64];
     let cost = pm_math::cp_buy_cost(&reserves, 0, 0, 100_000_000);
 
-    // Binary formula: cost = R_other * amount / (R_target - amount)
-    // = 1B * 100M / (1B - 100M) = 1B * 100M / 900M ≈ 111,111,112
-    assert!(cost >= 111_111_111u64, 0); // allow for rounding
-    assert!(cost <= 111_111_113u64, 0);
+    assert!(cost >= 111_111_111u64, 0);
+    assert!(cost <= 111_111_113u64, 1);
 }
 
 #[test]
@@ -27,68 +22,49 @@ fun test_categorical_sell_matches_binary_equal_reserves() {
     let reserves = vector[1_000_000_000u64, 1_000_000_000u64];
     let proceeds = pm_math::cp_sell_proceeds(&reserves, 0, 0, 100_000_000);
 
-    // Binary formula: proceeds = R_other * amount / (R_target + amount)
-    // = 1B * 100M / (1B + 100M) = 1B * 100M / 1.1B ≈ 90,909,090
     assert!(proceeds >= 90_909_089u64, 0);
-    assert!(proceeds <= 90_909_091u64, 0);
+    assert!(proceeds <= 90_909_091u64, 1);
 }
 
 #[test]
 fun test_categorical_probability_matches_binary() {
-    // Binary with unequal reserves
     let reserves = vector[500_000_000u64, 1_500_000_000u64];
     let p0 = pm_math::cp_probability_bps(&reserves, 0, 0);
     let p1 = pm_math::cp_probability_bps(&reserves, 0, 1);
 
-    // Binary formula: P(0) = R_1 / (R_0 + R_1) = 1.5B / 2B = 75%
     assert!(p0 == 7500, 0);
     assert!(p1 == 2500, 1);
     assert!(p0 + p1 == 10000, 2);
 }
 
-// ═══════════════════════════════════════════════════════════════
-// Ternary (N=3) Categorical Tests
-// ═══════════════════════════════════════════════════════════════
+// Ternary categorical cases
 
 #[test]
 fun test_categorical_3_outcome_buy_equal_reserves() {
-    // Ternary market with equal reserves of 100 each
     let reserves = vector[100u64, 100u64, 100u64];
-
-    // Buy 10 shares of outcome 0
-    // Formula: cost = product_of_others * amount / (R_0 - amount)
-    //        = (100 * 100) * 10 / (100 - 10)
-    //        = 10000 * 10 / 90
-    //        = 100000 / 90
-    //        = 1111 (with ceiling)
     let cost = pm_math::cp_buy_cost(&reserves, 0, 0, 10);
-    assert!(cost == 1112u64, 0); // ceiling division: (100000 + 90 - 1) / 90
+
+    // The active categorical CPMM finds the smallest symmetric increment on the
+    // non-target outcomes that restores the original reserve product.
+    assert!(cost == 6u64, 0);
 }
 
 #[test]
 fun test_categorical_3_outcome_sell_equal_reserves() {
     let reserves = vector[100u64, 100u64, 100u64];
-
-    // Sell 10 shares of outcome 0
-    // Formula: proceeds = product_of_others * amount / (R_0 + amount)
-    //        = (100 * 100) * 10 / (100 + 10)
-    //        = 10000 * 10 / 110
-    //        = 100000 / 110
-    //        = 909 (floor)
     let proceeds = pm_math::cp_sell_proceeds(&reserves, 0, 0, 10);
-    assert!(proceeds == 909u64, 0);
+
+    assert!(proceeds == 4u64, 0);
 }
 
 #[test]
 fun test_categorical_3_outcome_probability_equal_reserves() {
     let reserves = vector[100u64, 100u64, 100u64];
 
-    // All three outcomes should have equal probability
     let p0 = pm_math::cp_probability_bps(&reserves, 0, 0);
     let p1 = pm_math::cp_probability_bps(&reserves, 0, 1);
     let p2 = pm_math::cp_probability_bps(&reserves, 0, 2);
 
-    // Each should be approximately 10000/3 ≈ 3333
     assert!(p0 >= 3333u64, 0);
     assert!(p1 >= 3333u64, 1);
     assert!(p2 >= 3333u64, 2);
@@ -98,48 +74,32 @@ fun test_categorical_3_outcome_probability_equal_reserves() {
 
 #[test]
 fun test_categorical_3_outcome_probability_unequal_reserves() {
-    // Three outcomes with unequal reserves
-    // R = [100, 200, 300]
     let reserves = vector[100u64, 200u64, 300u64];
 
     let p0 = pm_math::cp_probability_bps(&reserves, 0, 0);
     let p1 = pm_math::cp_probability_bps(&reserves, 0, 1);
     let p2 = pm_math::cp_probability_bps(&reserves, 0, 2);
 
-    // P(0) = (200 * 300) / (100*200 + 200*300 + 100*300)
-    //      = 60000 / (20000 + 60000 + 30000)
-    //      = 60000 / 110000 ≈ 5454 bps
-    // P(1) = (100 * 300) / 110000 ≈ 2727 bps
-    // P(2) = (100 * 200) / 110000 ≈ 1818 bps
-
-    // Integer division can round down by one basis point in aggregate.
     let total = p0 + p1 + p2;
     assert!(total >= 9999u64 && total <= 10000u64, 0);
-
-    // Higher reserve = lower probability (inverse relationship)
     assert!(p0 > p1, 1);
     assert!(p1 > p2, 2);
 }
 
 #[test]
 fun test_categorical_3_outcome_buy_then_sell() {
-    // Buy and sell should form a valid cycle
     let reserves = vector[1000u64, 1000u64, 1000u64];
-
     let amount = 100u64;
-    let cost = pm_math::cp_buy_cost(&reserves, 1, 0, amount);
 
-    // Update reserves after buy (outcome 1 decreases, others increase)
-    // After buy: R_1 -= amount, R_0 += (cost/2)?, R_2 += (cost/2)?
-    // Actually: in CPMM, bought shares leave pool, cost goes back to maintain invariant
-    // For simplicity, test that cost is positive
-    assert!(cost > 0, 0);
-    assert!(cost > amount, 1); // should have slippage (cost > amount)
+    let cost = pm_math::cp_buy_cost(&reserves, 1, 0, amount);
+    let proceeds = pm_math::cp_sell_proceeds(&reserves, 1, 0, amount);
+
+    assert!(cost == 55u64, 0);
+    assert!(proceeds == 46u64, 1);
+    assert!(cost > proceeds, 2);
 }
 
-// ═══════════════════════════════════════════════════════════════
-// Quaternary (N=4) Categorical Tests
-// ═══════════════════════════════════════════════════════════════
+// Higher outcome counts
 
 #[test]
 fun test_categorical_4_outcome_probability_equal_reserves() {
@@ -150,63 +110,11 @@ fun test_categorical_4_outcome_probability_equal_reserves() {
     let p2 = pm_math::cp_probability_bps(&reserves, 0, 2);
     let p3 = pm_math::cp_probability_bps(&reserves, 0, 3);
 
-    // Each should be approximately 2500
     assert!(p0 + p1 + p2 + p3 == 10000u64, 0);
 }
 
-// ═══════════════════════════════════════════════════════════════
-// Edge Cases
-// ═══════════════════════════════════════════════════════════════
-
-#[test]
-fun test_categorical_3_outcome_small_buy() {
-    let reserves = vector[1_000_000_000u64, 1_000_000_000u64, 1_000_000_000u64];
-
-    // Buy a small amount
-    let cost = pm_math::cp_buy_cost(&reserves, 0, 0, 1_000);
-
-    // In categorical CPMM, cost scales with the product of the other reserves.
-    assert!(cost > 1_000u64, 0);
-    assert!(cost < 2_000_000_000_000u64, 1);
-}
-
-#[test]
-fun test_categorical_3_outcome_large_buy() {
-    let reserves = vector[1_000_000_000u64, 1_000_000_000u64, 1_000_000_000u64];
-
-    // Buy a large amount (25% of one reserve)
-    let cost = pm_math::cp_buy_cost(&reserves, 0, 0, 250_000_000);
-
-    // Cost should remain finite and grow sharply for larger categorical buys.
-    assert!(cost > 100_000_000_000_000_000u64, 0);
-    assert!(cost < 500_000_000_000_000_000u64, 1);
-}
-
-#[test]
-fun test_categorical_zero_amount_buy() {
-    let reserves = vector[100u64, 100u64, 100u64];
-
-    // Buying 0 should cost 0
-    let cost = pm_math::cp_buy_cost(&reserves, 0, 0, 0);
-    assert!(cost == 0, 0);
-}
-
-#[test]
-fun test_categorical_zero_amount_sell() {
-    let reserves = vector[100u64, 100u64, 100u64];
-
-    // Selling 0 should yield 0
-    let proceeds = pm_math::cp_sell_proceeds(&reserves, 0, 0, 0);
-    assert!(proceeds == 0, 0);
-}
-
-// ═══════════════════════════════════════════════════════════════
-// Maximum Outcomes (N=16) Tests
-// ═══════════════════════════════════════════════════════════════
-
 #[test]
 fun test_categorical_16_outcome_equal_reserves() {
-    // 16 outcomes with equal reserves
     let reserves = vector[
         100u64, 100u64, 100u64, 100u64,
         100u64, 100u64, 100u64, 100u64,
@@ -214,12 +122,10 @@ fun test_categorical_16_outcome_equal_reserves() {
         100u64, 100u64, 100u64, 100u64,
     ];
 
-    // Each outcome should have approximately equal probability
     let p0 = pm_math::cp_probability_bps(&reserves, 0, 0);
     let p8 = pm_math::cp_probability_bps(&reserves, 0, 8);
     let p15 = pm_math::cp_probability_bps(&reserves, 0, 15);
 
-    // All should be close to 625 (10000/16)
     assert!(p0 >= 620u64, 0);
     assert!(p8 >= 620u64, 1);
     assert!(p15 >= 620u64, 2);
@@ -232,38 +138,52 @@ fun test_categorical_8_outcome_buy() {
         100u64, 100u64, 100u64, 100u64,
     ];
 
-    // Buy 10 shares of outcome 0 within the supported <= 8 outcome range.
     let cost = pm_math::cp_buy_cost(&reserves, 0, 0, 10);
 
     assert!(cost > 0, 0);
 }
 
-// ═══════════════════════════════════════════════════════════════
-// Product Invariant Preservation Tests
-// ═══════════════════════════════════════════════════════════════
+// Edge cases
+
+#[test]
+fun test_categorical_3_outcome_small_buy() {
+    let reserves = vector[1_000_000_000u64, 1_000_000_000u64, 1_000_000_000u64];
+    let cost = pm_math::cp_buy_cost(&reserves, 0, 0, 1_000);
+
+    assert!(cost == 501u64, 0);
+}
+
+#[test]
+fun test_categorical_3_outcome_large_buy() {
+    let reserves = vector[1_000_000_000u64, 1_000_000_000u64, 1_000_000_000u64];
+    let cost = pm_math::cp_buy_cost(&reserves, 0, 0, 250_000_000);
+
+    assert!(cost == 154_700_539u64, 0);
+}
+
+#[test]
+fun test_categorical_zero_amount_buy() {
+    let reserves = vector[100u64, 100u64, 100u64];
+    let cost = pm_math::cp_buy_cost(&reserves, 0, 0, 0);
+    assert!(cost == 0, 0);
+}
+
+#[test]
+fun test_categorical_zero_amount_sell() {
+    let reserves = vector[100u64, 100u64, 100u64];
+    let proceeds = pm_math::cp_sell_proceeds(&reserves, 0, 0, 0);
+    assert!(proceeds == 0, 0);
+}
+
+// Invariant and slippage
 
 #[test]
 fun test_categorical_3_outcome_buy_invariant() {
-    // Test that buying maintains or increases the product invariant
     let reserves = vector[1000u64, 1000u64, 1000u64];
+    let cost = pm_math::cp_buy_cost(&reserves, 0, 0, 100u64);
 
-    // Initial product: 1000 * 1000 * 1000 = 1,000,000,000
-    let _initial_product = (1000u128 * 1000 * 1000);
-
-    let amount = 100u64;
-    let cost = pm_math::cp_buy_cost(&reserves, 0, 0, amount);
-
-    // After buy:
-    // R_0 = 1000 - 100 = 900
-    // R_1, R_2 need to increase such that product is maintained/exceeded
-    // In practice, cost is distributed proportionally or equally
-    // For this test, we just verify cost > 0 (which means formula works)
     assert!(cost > 0, 0);
 }
-
-// ═══════════════════════════════════════════════════════════════
-// Price Slippage Tests
-// ═══════════════════════════════════════════════════════════════
 
 #[test]
 fun test_categorical_3_outcome_slippage_increases_with_size() {
@@ -273,30 +193,20 @@ fun test_categorical_3_outcome_slippage_increases_with_size() {
     let medium_buy = pm_math::cp_buy_cost(&reserves, 0, 0, 500);
     let large_buy = pm_math::cp_buy_cost(&reserves, 0, 0, 1_000);
 
-    // Average cost per share should increase
-    let small_avg = small_buy / 100;
-    let medium_avg = medium_buy / 500;
-    let large_avg = large_buy / 1_000;
-
-    // Larger trades should have worse average price
-    assert!(medium_avg > small_avg, 0);
-    assert!(large_avg > medium_avg, 1);
+    assert!(medium_buy * 100 > small_buy * 500, 0);
+    assert!(large_buy * 500 > medium_buy * 1_000, 1);
 }
 
-// ═══════════════════════════════════════════════════════════════
-// Outcome Index Selection Tests
-// ═══════════════════════════════════════════════════════════════
+// Outcome selection
 
 #[test]
 fun test_categorical_3_outcome_different_indices() {
     let reserves = vector[100u64, 200u64, 300u64];
 
-    // Cost should vary based on which outcome we're buying
     let cost0 = pm_math::cp_buy_cost(&reserves, 0, 0, 10);
     let cost1 = pm_math::cp_buy_cost(&reserves, 0, 1, 10);
     let cost2 = pm_math::cp_buy_cost(&reserves, 0, 2, 10);
 
-    // Outcome with higher reserve should be cheaper to buy
     assert!(cost2 < cost1, 0);
     assert!(cost1 < cost0, 1);
 }

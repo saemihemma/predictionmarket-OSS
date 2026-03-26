@@ -1,3 +1,5 @@
+import { useId } from "react";
+
 interface DescriptionStepProps {
   description: string;
   onChange: (value: string) => void;
@@ -7,12 +9,15 @@ export default function DescriptionStep({
   description,
   onChange,
 }: DescriptionStepProps) {
+  const textareaId = useId();
+
   return (
     <div>
-      <label className="block text-sm font-medium text-mint mb-2">
+      <label htmlFor={textareaId} className="block text-sm font-medium text-mint mb-2">
         Description
       </label>
       <textarea
+        id={textareaId}
         value={description}
         onChange={(e) => onChange(e.target.value)}
         placeholder="Detailed description of the market..."

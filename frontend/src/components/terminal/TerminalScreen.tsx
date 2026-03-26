@@ -9,7 +9,7 @@ interface TerminalScreenProps {
 /**
  * Root fullscreen terminal wrapper.
  * Renders CRT overlay effects and provides the base terminal void background.
- * This is the outermost shell — render once per route.
+ * This is the outermost shell; render once per route.
  */
 export default function TerminalScreen({ children }: TerminalScreenProps) {
   return (

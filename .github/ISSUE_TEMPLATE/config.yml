@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security policy
+    url: https://github.com/saemihemma/predictionmarket-OSS/blob/main/SECURITY.md
+    about: Please report vulnerabilities privately via the security process in SECURITY.md.
+  - name: Documentation index
+    url: https://github.com/saemihemma/predictionmarket-OSS/blob/main/docs/INDEX.md
+    about: Start here for architecture, runbook, verification, and contributor docs.

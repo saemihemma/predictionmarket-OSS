@@ -1,3 +1,5 @@
+import { useId } from "react";
+
 interface ResolutionStepProps {
   trustTier: "sourceBackedCommunity" | "openCommunity";
   resolutionSourceType: string;
@@ -27,6 +29,11 @@ export default function ResolutionStep({
   onRulesChange,
   onCreatorControlsChange,
 }: ResolutionStepProps) {
+  const trustTierId = useId();
+  const sourceTypeId = useId();
+  const sourceUriId = useId();
+  const resolutionRulesId = useId();
+
   const sourceOptions = allowedSourceTypes ?? [];
 
   const handleTrustTierChange = (newTier: string) => {
@@ -44,8 +51,11 @@ export default function ResolutionStep({
   return (
     <>
       <div>
-        <label className="block text-sm font-medium text-mint mb-2">SETTLEMENT PROFILE</label>
+        <label htmlFor={trustTierId} className="block text-sm font-medium text-mint mb-2">
+          SETTLEMENT PROFILE
+        </label>
         <select
+          id={trustTierId}
           value={trustTier}
           onChange={(e) => handleTrustTierChange(e.target.value)}
           className="w-full p-4 text-base bg-bg-terminal text-text border border-border-panel outline-none"
@@ -66,8 +76,11 @@ export default function ResolutionStep({
       </div>
 
       <div>
-        <label className="block text-sm font-medium text-mint mb-2">EVIDENCE SOURCE TYPE</label>
+        <label htmlFor={sourceTypeId} className="block text-sm font-medium text-mint mb-2">
+          EVIDENCE SOURCE TYPE
+        </label>
         <select
+          id={sourceTypeId}
           value={sourceOptions.length > 0 ? resolutionSourceType : ""}
           onChange={(e) => onSourceTypeChange(e.target.value)}
           disabled={sourceOptions.length === 0}
@@ -92,10 +105,11 @@ export default function ResolutionStep({
       </div>
 
       <div>
-        <label className="block text-sm font-medium text-mint mb-2">
+        <label htmlFor={sourceUriId} className="block text-sm font-medium text-mint mb-2">
           PRIMARY SOURCE URL {sourceIsExpected ? "(REQUIRED)" : "(OPTIONAL)"}
         </label>
         <input
+          id={sourceUriId}
           type="text"
           value={resolutionSourceUri}
           onChange={(e) => onSourceUriChange(e.target.value)}
@@ -105,8 +119,11 @@ export default function ResolutionStep({
       </div>
 
       <div>
-        <label className="block text-sm font-medium text-mint mb-2">RESOLUTION RULES</label>
+        <label htmlFor={resolutionRulesId} className="block text-sm font-medium text-mint mb-2">
+          RESOLUTION RULES
+        </label>
         <textarea
+          id={resolutionRulesId}
           value={resolutionRules}
           onChange={(e) => onRulesChange(e.target.value)}
           placeholder="State exactly what resolves each outcome, which evidence wins if sources conflict, and how edge cases are handled."
