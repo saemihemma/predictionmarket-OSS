@@ -9,6 +9,9 @@ dist/
 frontend/public/protocol-manifest.json
 frontend/.tsbuild-node/
 frontend/tsconfig.tsbuildinfo
+frontend/test-results/
+frontend/vite-create-flow.log
+frontend/vite.config.ts.timestamp-*.mjs
 
 # Environment
 .env

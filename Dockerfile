@@ -1,3 +1,4 @@
+# Frontend production image for the public web app.
 FROM node:22-slim AS build
 WORKDIR /app
 

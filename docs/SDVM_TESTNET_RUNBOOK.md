@@ -108,6 +108,7 @@ Health checks:
 Service endpoint contract:
 
 - base URL in manifest: `serviceUrls.gasRelay`
+- `GET /v1/faucet-eligibility`
 - `POST /v1/sponsor`
 - `POST /v1/execute`
 - `GET /health`

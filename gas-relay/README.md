@@ -48,6 +48,7 @@ Blocked PTB commands include:
 
 ## Routes
 
+- `GET /v1/faucet-eligibility`
 - `POST /v1/sponsor`
 - `POST /v1/execute`
 - `GET /health`
@@ -79,6 +80,9 @@ cp .env.example .env
 npm install
 npm run dev
 ```
+
+For a deployed environment, set `ALLOWED_ORIGIN` explicitly and treat `SUI_RPC_URL`
+as required even if local development can fall back to defaults.
 
 ## Build
 

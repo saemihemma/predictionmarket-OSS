@@ -65,6 +65,9 @@ Important source-of-truth files:
 - `src/lib/market-constants.ts`
 - `src/hooks/`
 
+The repo no longer keeps a separate mock-data mode document. The maintained read
+path is live GraphQL first with the narrow RPC fallback described above.
+
 ## Wallet and Sponsored Flow
 
 Wallet connectivity comes from Mysten DApp Kit.

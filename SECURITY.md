@@ -69,7 +69,7 @@ At minimum:
 
 1. professional external audit
 2. sustained testnet soak with realistic usage
-3. green verification matrix from a clean checkout
+3. green CI and local checks from a clean checkout
 4. explicit governance and de-privileging plan
 5. documented incident and rollback procedures
 
@@ -83,5 +83,5 @@ At minimum:
 
 ## Contact
 
-For non-sensitive security process questions, use GitHub Discussions or Issues.
+For non-sensitive security process questions, use GitHub Issues.
 For actual vulnerabilities, use the private reporting path above.

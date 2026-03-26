@@ -35,6 +35,7 @@ npm run dev
 
 ```bash
 cd gas-relay
+cp .env.example .env
 npm install
 npm run dev
 ```
@@ -43,6 +44,7 @@ npm run dev
 
 ```bash
 cd phase-bot
+cp .env.example .env
 npm install
 npm run dev
 ```
@@ -87,6 +89,12 @@ node scripts/check-docs.mjs
 If a command is red on `main`, call that out explicitly in the PR instead of
 silently skipping it.
 
+This repo currently treats the CI surface above as the maintained release gate.
+Do not add ad hoc test files or research harnesses without either:
+
+- wiring them into a package script and CI, or
+- clearly archiving them as non-gating research
+
 ## Repo Conventions
 
 ### Documentation
@@ -102,6 +110,7 @@ silently skipping it.
 - Follow [frontend/FRONTEND_ARCHITECTURE.md](frontend/FRONTEND_ARCHITECTURE.md).
 - Preserve keyboard reachability, visible focus states, and route landmarks.
 - For public-route changes, run `npm run test:a11y`.
+- Keep `frontend/README.md` accurate to the routes in `frontend/src/App.tsx`.
 
 ### Move Contracts
 
@@ -118,6 +127,7 @@ silently skipping it.
 - Keep env contracts explicit in `.env.example` and docs.
 - Fail closed for deployment-critical configuration.
 - Do not add hidden allowlists or privileged bypasses.
+- Keep route inventories in service READMEs accurate to the actual server entrypoints.
 
 ## Pull Requests
 
@@ -130,6 +140,15 @@ A good PR should include:
 
 For UI changes, include screenshots or route-level notes.
 For protocol or relay changes, include the exact commands run.
+
+## Maintainer and Reviewer Expectations
+
+This repo is still small and testnet-first.
+
+- maintainers may ask for scope reduction if a cleanup quietly changes behavior
+- protocol-facing changes should expect docs updates in the same PR
+- reviewers should prefer explicit tradeoff notes over vague "follow-up later" language
+- if a contribution needs a design decision, open the design question before writing a large patch
 
 ## Branching and Commits
 
@@ -162,6 +181,16 @@ cleanup:
 
 - [Move composability cleanup: replace sender-directed transfers with caller-directed returns](https://github.com/saemihemma/predictionmarket-OSS/issues/1)
 
+## Security Research and Adversarial Review
+
+If you want to contribute attack simulations, protocol abuse tests, or relay stress
+cases, start in a normal GitHub Issue or PR discussion first.
+
+The rule for this repo is simple:
+
+- maintained release-gate tests live with the owning surface
+- historical or exploratory research should be clearly labeled and not presented as part of the default CI bar
+
 ## When to Stop and Escalate
 
 Stop and ask for a design decision if:
@@ -174,5 +203,5 @@ Stop and ask for a design decision if:
 ## Questions
 
 - Use GitHub Issues for bugs and feature requests
-- Use Discussions for architecture and design questions
+- Use GitHub Issues for architecture and design questions too unless a maintainer points to another forum
 - Use the private security path in [SECURITY.md](SECURITY.md) for vulnerabilities

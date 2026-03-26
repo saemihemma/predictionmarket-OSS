@@ -23,7 +23,8 @@ This document explains the same architecture in prose so contributors and review
 
 ## On-Chain Package
 
-The `prediction_market` package currently includes 20 Move source modules in `contracts/sources/`.
+The `prediction_market` package keeps runtime modules in `contracts/sources/`
+and test-only modules in `contracts/tests/`.
 
 ### Core groups
 
@@ -76,6 +77,8 @@ Responsibilities:
 
 This service is part of the deployed trust boundary. It is not just convenience infrastructure.
 
+See [../gas-relay/README.md](../gas-relay/README.md) for the service contract and route inventory.
+
 ## Phase Bot
 
 The phase bot monitors vote rounds and advances them when deadlines pass.
@@ -88,6 +91,8 @@ Responsibilities:
 - expose health and readiness endpoints
 
 The bot is operationally important but does not define protocol truth. On-chain state remains authoritative.
+
+See [../phase-bot/README.md](../phase-bot/README.md) for the runtime contract and health semantics.
 
 ## Testnet-Only Admin Levers
 

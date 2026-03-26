@@ -1,6 +1,6 @@
 import { defineConfig, devices } from "@playwright/test";
 
-const PORT = 4175;
+const PORT = 43175;
 
 export default defineConfig({
   testDir: "./tests/accessibility",
@@ -20,7 +20,7 @@ export default defineConfig({
   webServer: {
     command: `npm run build && npm run preview -- --host 127.0.0.1 --port ${PORT}`,
     port: PORT,
-    reuseExistingServer: true,
+    reuseExistingServer: false,
     timeout: 180000,
   },
   projects: [
