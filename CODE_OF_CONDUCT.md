@@ -30,4 +30,4 @@ who are joining the work from different backgrounds.
 For conduct issues, contact the maintainer privately through the same GitHub
 account used for this repository.
 
-For security issues, use [SECURITY.md](SECURITY.md) instead.
+For security-sensitive concerns, use the normal GitHub workflow described in the repo README unless the project later adds a different reporting path.

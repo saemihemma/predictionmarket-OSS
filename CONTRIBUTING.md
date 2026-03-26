@@ -9,7 +9,6 @@ Read these first:
 - [README](README.md)
 - [Docs Index](docs/INDEX.md)
 - [Frontend Architecture](frontend/FRONTEND_ARCHITECTURE.md)
-- [Security](SECURITY.md)
 
 If your change touches protocol behavior, docs updates are part of the change.
 
@@ -204,4 +203,4 @@ Stop and ask for a design decision if:
 
 - Use GitHub Issues for bugs and feature requests
 - Use GitHub Issues for architecture and design questions too unless a maintainer points to another forum
-- Use the private security path in [SECURITY.md](SECURITY.md) for vulnerabilities
+- Use GitHub Issues or PR discussion for security concerns too, unless the repo later adds a different reporting path

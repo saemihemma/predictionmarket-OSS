@@ -81,7 +81,7 @@ Supporting docs:
 
 - [Prediction Market Architecture](PREDICTION_MARKET_ARCHITECTURE.md)
 - [SDVM Testnet Runbook](SDVM_TESTNET_RUNBOOK.md)
-- [Security](../SECURITY.md)
+- [README](../README.md)
 
 ## Known Review Boundaries
 

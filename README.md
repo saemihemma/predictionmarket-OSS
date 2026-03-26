@@ -25,7 +25,7 @@ frontend/        React + TypeScript app for markets, portfolio, create flow, and
 gas-relay/       Sponsored transaction relay for public-beta flows
 phase-bot/       SDVM phase-advancement bot
 deployments/     Live deployment manifests and service URLs
-docs/            Canonical architecture, runbook, security, and accessibility docs
+docs/            Canonical architecture, runbook, and accessibility docs
 scripts/         Manifest sync, deployment, and repo-integrity helpers
 Dockerfile       Frontend production image
 architecture.mermaid
@@ -106,7 +106,6 @@ Start here:
 
 - [Docs Index](docs/INDEX.md)
 - [Contributing](CONTRIBUTING.md)
-- [Security](SECURITY.md)
 - [Code of Conduct](CODE_OF_CONDUCT.md)
 
 Canonical runtime docs:
@@ -133,11 +132,12 @@ If you change behavior, update the matching docs in the same PR.
 
 ## Security
 
-This is pre-mainnet software. Do not treat testnet deployment as a security sign-off.
+This is pre-mainnet, testnet-first software. Do not treat the current deployment as a security sign-off.
 
-- report vulnerabilities privately via [SECURITY.md](SECURITY.md)
-- review the current trust model and known limitations before public deployment
+- use normal GitHub issues and PRs for security discussion in this community-owned repo
+- be explicit about trust boundaries, admin levers, and operator assumptions
 - do not introduce new privileged surfaces without documenting them
+- do not paste live secrets, private keys, or sensitive operational material into public issues
 
 ## License
 

@@ -6,7 +6,6 @@ This directory is split into **canonical current docs** and **archived historica
 
 - [README](../README.md)
 - [Contributing](../CONTRIBUTING.md)
-- [Security](../SECURITY.md)
 - [Canonical Service Graph](../architecture.mermaid)
 
 ## Runtime and Architecture
