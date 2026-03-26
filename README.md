@@ -48,7 +48,7 @@ Use these as the canonical architecture references:
 
 ### Prerequisites
 
-- Node.js 18+
+- Node.js 22+
 - npm
 - Sui CLI with Move 2024 support
 - Testnet SUI for local contract and ops work

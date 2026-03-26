@@ -15,7 +15,7 @@ If your change touches protocol behavior, docs updates are part of the change.
 
 ## Prerequisites
 
-- Node.js 18+
+- Node.js 22+
 - npm
 - Git
 - Sui CLI with Move 2024 support
